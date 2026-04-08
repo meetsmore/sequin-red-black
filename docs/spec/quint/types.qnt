@@ -42,15 +42,15 @@ module types {
     enrichment_ids: Set[EnrichmentId]
   }
 
-  type SinkStatus =
+  type SinkLifecycle =
     | SinkActive
     | SinkPaused
-    | SinkBackfilling
     | SinkDisabled
 
   type SinkState = {
     config: SinkConfig,
-    status: SinkStatus
+    lifecycle: SinkLifecycle,
+    backfilling: bool
   }
 
   // ---------------------------------------------------------------------------

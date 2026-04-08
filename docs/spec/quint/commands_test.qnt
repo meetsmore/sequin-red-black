@@ -55,7 +55,7 @@ module commands_test {
   }
 
   pure val fixture_live_state: LivePipelineState = {
-    sink: { config: fixture_sink_config, status: SinkActive },
+    sink: { config: fixture_sink_config, lifecycle: SinkActive, backfilling: false },
     index: { config: fixture_index_config, status: IndexGreen, doc_count: 1000 },
     transform: { config: fixture_transform_config, status: TransformActive },
     enrichment: { config: fixture_enrichment_config, status: EnrichmentActive },

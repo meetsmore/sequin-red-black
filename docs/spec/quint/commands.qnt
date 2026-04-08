@@ -36,7 +36,7 @@ module commands {
       if (p.effects.length() > 0 and p.pipeline.in(desired_pipelines.keys())) {
         val cfg = desired_pipelines.get(p.pipeline)
         acc.put((p.pipeline, p.target_color), {
-          sink: { config: cfg.sink, status: SinkBackfilling },
+          sink: { config: cfg.sink, lifecycle: SinkActive, backfilling: true },
           index: { config: cfg.index, status: IndexGreen, doc_count: 0 },
           transform: { config: cfg.transform, status: TransformActive },
           enrichment: { config: cfg.enrichment, status: EnrichmentActive },
@@ -60,7 +60,7 @@ module commands {
     // Precondition: the colored variant exists
     (pipeline, color).in(live_pipelines.keys()),
     // Precondition: the colored variant is not mid-backfill
-    live_pipelines.get((pipeline, color)).sink.status != SinkBackfilling,
+    not(live_pipelines.get((pipeline, color)).sink.backfilling),
     // Swap alias
     aliases' = aliases.put(pipeline, color),
     desired_pipelines' = desired_pipelines,
@@ -92,10 +92,10 @@ module commands {
 
   action backfill_completes(pipeline: PipelineName, color: Color): bool = all {
     (pipeline, color).in(live_pipelines.keys()),
-    live_pipelines.get((pipeline, color)).sink.status == SinkBackfilling,
+    live_pipelines.get((pipeline, color)).sink.backfilling,
     live_pipelines' = live_pipelines.put((pipeline, color),
       { ...live_pipelines.get((pipeline, color)),
-        sink: { ...live_pipelines.get((pipeline, color)).sink, status: SinkActive }
+        sink: { ...live_pipelines.get((pipeline, color)).sink, backfilling: false }
       }
     ),
     desired_pipelines' = desired_pipelines,
@@ -169,6 +169,13 @@ module commands {
       }
     )
 
+  // 4. Disabled sinks cannot be backfilling
+  val disabled_not_backfilling: bool =
+    live_pipelines.keys().forall(k =>
+      val lp = live_pipelines.get(k)
+      lp.sink.lifecycle == SinkDisabled implies not(lp.sink.backfilling)
+    )
+
   // ---------------------------------------------------------------------------
   // Witnesses (liveness) — VIOLATED = good, protocol CAN reach this state
   // ---------------------------------------------------------------------------
@@ -195,7 +202,7 @@ module commands {
   // Witness: backfill can complete
   val witness_backfill_completes: bool =
     not(live_pipelines.keys().exists(k =>
-      live_pipelines.get(k).sink.status == SinkActive
+      live_pipelines.get(k).sink.lifecycle == SinkActive and not(live_pipelines.get(k).sink.backfilling)
     ))
 
   // Witness: a full cycle can complete (deploy, backfill, activate, drop old)
