@@ -2,16 +2,24 @@
 module types {
 
   // ---------------------------------------------------------------------------
-  // Resource identifiers
+  // Identifiers
   // ---------------------------------------------------------------------------
 
-  // Color of a deployment slot
+  type ResourceId = str
+  type PipelineName = str
+
+  // ---------------------------------------------------------------------------
+  // Color — bounded set for model checking
+  // ---------------------------------------------------------------------------
+
   type Color =
     | Red
     | Black
-
-  // Unique identifier for any resource
-  type ResourceId = str
+    | Blue
+    | Green
+    | Purple
+    | Orange
+    | Yellow
 
   // ---------------------------------------------------------------------------
   // Sequin Sink
@@ -36,8 +44,7 @@ module types {
 
   type SinkState = {
     config: SinkConfig,
-    status: SinkStatus,
-    color: Color
+    status: SinkStatus
   }
 
   // ---------------------------------------------------------------------------
@@ -62,7 +69,6 @@ module types {
   type IndexState = {
     config: IndexConfig,
     status: IndexStatus,
-    color: Color,
     doc_count: int
   }
 
@@ -109,18 +115,88 @@ module types {
   }
 
   // ---------------------------------------------------------------------------
-  // Unified resource wrapper
+  // Pipeline — color-agnostic desired config
   // ---------------------------------------------------------------------------
 
-  type Resource =
-    | SinkResource(SinkState)
-    | IndexResource(IndexState)
-    | TransformResource(TransformState)
-    | EnrichmentResource(EnrichmentState)
+  type PipelineConfig = {
+    name: PipelineName,
+    sink: SinkConfig,
+    index: IndexConfig,
+    transform: TransformConfig,
+    enrichment: EnrichmentConfig
+  }
 
-  type ResourceConfig =
-    | SinkCfg(SinkConfig)
-    | IndexCfg(IndexConfig)
-    | TransformCfg(TransformConfig)
-    | EnrichmentCfg(EnrichmentConfig)
+  // ---------------------------------------------------------------------------
+  // Live pipeline state — one per (pipeline, color) pair
+  // ---------------------------------------------------------------------------
+
+  type LivePipelineState = {
+    sink: SinkState,
+    index: IndexState,
+    transform: TransformState,
+    enrichment: EnrichmentState
+  }
+
+  // ---------------------------------------------------------------------------
+  // Change detection
+  // ---------------------------------------------------------------------------
+
+  type ChangeKind =
+    | NoChange
+    | Create
+    | Update
+    | Delete
+
+  type FieldChange = {
+    field_name: str,
+    requires_backfill: bool,
+    requires_reindex: bool
+  }
+
+  type ResourceChange = {
+    resource_id: ResourceId,
+    kind: ChangeKind,
+    field_changes: Set[FieldChange]
+  }
+
+  // ---------------------------------------------------------------------------
+  // Effects — the operations a plan can produce
+  // ---------------------------------------------------------------------------
+
+  type Effect =
+    | CreateSink(SinkConfig)
+    | CreateIndex(IndexConfig)
+    | CreateTransform(TransformConfig)
+    | CreateEnrichment(EnrichmentConfig)
+    | DeleteSink(ResourceId)
+    | DeleteIndex(ResourceId)
+    | DeleteTransform(ResourceId)
+    | DeleteEnrichment(ResourceId)
+    | TriggerBackfill(ResourceId)
+    | TriggerReindex(ResourceId)
+    | SwapAlias({ pipeline: PipelineName, color: Color })
+
+  // ---------------------------------------------------------------------------
+  // Plan
+  // ---------------------------------------------------------------------------
+
+  type EffectStatus =
+    | Pending
+    | InProgress
+    | Completed
+    | Failed(str)
+
+  type PlannedEffect = {
+    effect: Effect,
+    status: EffectStatus,
+    depends_on: Set[int],
+    order: int
+  }
+
+  type Plan = {
+    pipeline: PipelineName,
+    target_color: Color,
+    changes: Set[ResourceChange],
+    effects: List[PlannedEffect]
+  }
 }
