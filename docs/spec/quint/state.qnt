@@ -1,105 +1,82 @@
-// Live state and desired state modeling
+// State variables and initialization for the red-black deployment orchestrator
 module state {
 
   import types.* from "./types"
-  import plan.* from "./plan"
 
   // ---------------------------------------------------------------------------
   // State variables
   // ---------------------------------------------------------------------------
 
-  // The desired state from config files
-  var desired_sinks: ResourceId -> SinkConfig
-  var desired_indexes: ResourceId -> IndexConfig
-  var desired_transforms: ResourceId -> TransformConfig
-  var desired_enrichments: ResourceId -> EnrichmentConfig
+  // Desired state from compiled config (color-agnostic)
+  var desired_pipelines: PipelineName -> PipelineConfig
 
-  // The live state of deployed resources
-  var live_sinks: ResourceId -> SinkState
-  var live_indexes: ResourceId -> IndexState
-  var live_transforms: ResourceId -> TransformState
-  var live_enrichments: ResourceId -> EnrichmentState
+  // Live state discovered from Sequin API + OpenSearch
+  // Keyed by (PipelineName, Color) — each colored variant is a separate entry
+  var live_pipelines: (PipelineName, Color) -> LivePipelineState
 
-  // Which color is currently active (receiving traffic)
-  var active_color: Color
+  // Which color each pipeline's alias points to (determines active color)
+  var aliases: PipelineName -> Color
 
-  // The current plan (if any)
-  var current_plan: Plan
+  // The current set of plans (one per changed pipeline)
+  var current_plans: Set[Plan]
+
+  // ---------------------------------------------------------------------------
+  // Constants for model checking
+  // ---------------------------------------------------------------------------
+
+  pure val ALL_COLORS: Set[Color] = Set(Red, Black, Blue, Green, Purple, Orange, Yellow)
 
   // ---------------------------------------------------------------------------
   // Initialization
   // ---------------------------------------------------------------------------
 
   action init = all {
-    desired_sinks' = Map(),
-    desired_indexes' = Map(),
-    desired_transforms' = Map(),
-    desired_enrichments' = Map(),
-    live_sinks' = Map(),
-    live_indexes' = Map(),
-    live_transforms' = Map(),
-    live_enrichments' = Map(),
-    active_color' = Red,
-    current_plan' = { changes: Set(), effects: List(), target_color: Black },
+    desired_pipelines' = Map(),
+    live_pipelines' = Map(),
+    aliases' = Map(),
+    current_plans' = Set(),
   }
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  // The inactive color is the deployment target
-  pure def inactive_color(c: Color): Color =
-    match c {
-      | Red => Black
-      | Black => Red
-    }
+  // Get all colors that have live resources for a pipeline
+  pure def live_colors(pipeline: PipelineName, live: (PipelineName, Color) -> LivePipelineState): Set[Color] =
+    ALL_COLORS.filter(c => live.keys().contains((pipeline, c)))
+
+  // Get colors that have NO live resources for a pipeline (available for deployment)
+  pure def available_colors(pipeline: PipelineName, live: (PipelineName, Color) -> LivePipelineState): Set[Color] =
+    ALL_COLORS.filter(c => not(live.keys().contains((pipeline, c))))
+
+  // Check if a pipeline has any live colored variants
+  pure def pipeline_exists_live(pipeline: PipelineName, live: (PipelineName, Color) -> LivePipelineState): bool =
+    ALL_COLORS.exists(c => live.keys().contains((pipeline, c)))
 
   // ---------------------------------------------------------------------------
-  // Config loading (models reading config files)
+  // Config loading (models reading compiled config)
   // ---------------------------------------------------------------------------
 
-  action load_sink_config(id: ResourceId, cfg: SinkConfig): bool = all {
-    desired_sinks' = desired_sinks.put(id, cfg),
-    desired_indexes' = desired_indexes,
-    desired_transforms' = desired_transforms,
-    desired_enrichments' = desired_enrichments,
-    live_sinks' = live_sinks,
-    live_indexes' = live_indexes,
-    live_transforms' = live_transforms,
-    live_enrichments' = live_enrichments,
-    active_color' = active_color,
-    current_plan' = current_plan,
+  action load_desired_config(pipeline: PipelineName, cfg: PipelineConfig): bool = all {
+    desired_pipelines' = desired_pipelines.put(pipeline, cfg),
+    live_pipelines' = live_pipelines,
+    aliases' = aliases,
+    current_plans' = current_plans,
   }
 
-  action load_index_config(id: ResourceId, cfg: IndexConfig): bool = all {
-    desired_sinks' = desired_sinks,
-    desired_indexes' = desired_indexes.put(id, cfg),
-    desired_transforms' = desired_transforms,
-    desired_enrichments' = desired_enrichments,
-    live_sinks' = live_sinks,
-    live_indexes' = live_indexes,
-    live_transforms' = live_transforms,
-    live_enrichments' = live_enrichments,
-    active_color' = active_color,
-    current_plan' = current_plan,
+  // Models discovering live state from Sequin API + OpenSearch
+  action discover_live_state(pipeline: PipelineName, color: Color, state: LivePipelineState): bool = all {
+    live_pipelines' = live_pipelines.put((pipeline, color), state),
+    desired_pipelines' = desired_pipelines,
+    aliases' = aliases,
+    current_plans' = current_plans,
   }
 
-  // ---------------------------------------------------------------------------
-  // Plan generation (stub — to be expanded)
-  // ---------------------------------------------------------------------------
-
-  // Compare desired vs live and produce a plan
-  action generate_plan: bool = all {
-    // TODO: diff each resource type, collect changes, derive effects
-    current_plan' = { changes: Set(), effects: List(), target_color: inactive_color(active_color) },
-    desired_sinks' = desired_sinks,
-    desired_indexes' = desired_indexes,
-    desired_transforms' = desired_transforms,
-    desired_enrichments' = desired_enrichments,
-    live_sinks' = live_sinks,
-    live_indexes' = live_indexes,
-    live_transforms' = live_transforms,
-    live_enrichments' = live_enrichments,
-    active_color' = active_color,
+  // Models discovering which color an alias points to
+  action discover_alias(pipeline: PipelineName, color: Color): bool = all {
+    aliases' = aliases.put(pipeline, color),
+    desired_pipelines' = desired_pipelines,
+    live_pipelines' = live_pipelines,
+    current_plans' = current_plans,
   }
 }
