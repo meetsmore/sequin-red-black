@@ -26,17 +26,19 @@ module commands {
   // Same as plan, then execute effects (create resources, trigger backfills)
   // ---------------------------------------------------------------------------
 
-  action cmd_apply: bool = all {
+  action cmd_apply(skip_backfill: bool): bool = all {
     // Precondition: desired config exists
     desired_pipelines.keys().size() > 0,
     // Generate fresh plans (apply = plan + execute)
+    // TriggerBackfill effects are always in the plan (for user visibility),
+    // but when skip_backfill is true, the sink starts without backfilling
     val plans = generate_plans(desired_pipelines, live_pipelines, ALL_COLORS)
     // For simplicity in the spec, we model apply as creating all target pipelines at once
     val new_live = plans.fold(live_pipelines, (acc, p) =>
       if (p.effects.length() > 0 and p.pipeline.in(desired_pipelines.keys())) {
         val cfg = desired_pipelines.get(p.pipeline)
         acc.put((p.pipeline, p.target_color), {
-          sink: { config: cfg.sink, lifecycle: SinkActive, backfilling: true },
+          sink: { config: cfg.sink, lifecycle: SinkActive, backfilling: not(skip_backfill) },
           index: { config: cfg.index, status: IndexGreen, doc_count: 0 },
           transform: { config: cfg.transform, status: TransformActive },
           enrichment: { config: cfg.enrichment, status: EnrichmentActive },
@@ -49,6 +51,27 @@ module commands {
       aliases' = aliases,
       current_plans' = plans,
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Command: backfill <pipeline> <color>
+  // Manually trigger a backfill on a specific colored variant
+  // ---------------------------------------------------------------------------
+
+  action cmd_backfill(pipeline: PipelineName, color: Color): bool = all {
+    // Precondition: the colored variant exists
+    (pipeline, color).in(live_pipelines.keys()),
+    // Precondition: not already backfilling
+    not(live_pipelines.get((pipeline, color)).sink.backfilling),
+    // Start backfilling
+    live_pipelines' = live_pipelines.put((pipeline, color),
+      { ...live_pipelines.get((pipeline, color)),
+        sink: { ...live_pipelines.get((pipeline, color)).sink, backfilling: true }
+      }
+    ),
+    desired_pipelines' = desired_pipelines,
+    aliases' = aliases,
+    current_plans' = current_plans,
   }
 
   // ---------------------------------------------------------------------------
@@ -109,7 +132,16 @@ module commands {
 
   action step = any {
     cmd_plan,
-    cmd_apply,
+    // Apply with or without backfill
+    nondet skip = Set(true, false).oneOf()
+    cmd_apply(skip),
+    // Manually trigger backfill
+    all {
+      desired_pipelines.keys().size() > 0,
+      nondet p = desired_pipelines.keys().oneOf()
+      nondet c = ALL_COLORS.oneOf()
+      cmd_backfill(p, c),
+    },
     // Activate and drop need parameters — model with nondet
     // Guard: only attempt if desired_pipelines is non-empty (oneOf requires non-empty set)
     all {

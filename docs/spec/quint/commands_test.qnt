@@ -201,7 +201,7 @@ module commands_test {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
       .then(cmd_plan)
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(all {
         // Verify new colored pipeline was created
         assert(live_pipelines.keys().size() > 0),
@@ -217,7 +217,7 @@ module commands_test {
   run test_activate_after_backfill = {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val deployed_keys = live_pipelines.keys()
         val deployed_key = deployed_keys.fold(("", Red), (acc, k) => k)
@@ -268,7 +268,7 @@ module commands_test {
         current_plans' = current_plans,
       })
       // Apply: creates resources and starts backfill
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(all {
         // Exactly one colored variant should exist
         assert(live_pipelines.keys().size() == 1),
@@ -334,7 +334,7 @@ module commands_test {
       .then(load_desired_config("jobs", fixture_pipeline_config))
       .then(load_desired_config("clients", fixture_clients_config))
       // Apply both at once
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val jobs_color = deployed_color_for("jobs", live_pipelines)
         val clients_color = deployed_color_for("clients", live_pipelines)
@@ -401,7 +401,7 @@ module commands_test {
     init
       // Setup: jobs is live on Red (simulate by loading + apply + backfill + activate)
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
         backfill_completes("jobs", color)
@@ -417,7 +417,7 @@ module commands_test {
         load_desired_config("jobs", updated_config)
       )
       // Apply: should create a NEW colored variant (different from current)
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
         val old_color = aliases.get("jobs")
@@ -495,7 +495,7 @@ module commands_test {
   run test_e2e_update_mappings = {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
         backfill_completes("jobs", color)
@@ -522,7 +522,7 @@ module commands_test {
         current_plans' = current_plans,
       })
       // Apply
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
         val old_color = aliases.get("jobs")
@@ -550,7 +550,7 @@ module commands_test {
   run test_e2e_update_enrichment = {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
         backfill_completes("jobs", color)
@@ -565,7 +565,7 @@ module commands_test {
         val updated_config = { ...fixture_pipeline_config, enrichment: updated_enrichment }
         load_desired_config("jobs", updated_config)
       )
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
         val old_color = aliases.get("jobs")
@@ -591,7 +591,7 @@ module commands_test {
   run test_e2e_no_changes_no_plan = {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
         backfill_completes("jobs", color)
@@ -628,7 +628,7 @@ module commands_test {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
       .then(load_desired_config("clients", fixture_clients_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       // Complete backfills and activate both
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
@@ -652,7 +652,7 @@ module commands_test {
         val updated_config = { ...fixture_clients_config, transform: updated_transform }
         load_desired_config("clients", updated_config)
       )
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val clients_colors = ALL_COLORS.filter(c => ("clients", c).in(live_pipelines.keys()))
         all {
@@ -676,7 +676,7 @@ module commands_test {
   run test_e2e_rollback_to_old_color = {
     init
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
         backfill_completes("jobs", color)
@@ -691,7 +691,7 @@ module commands_test {
         val updated_config = { ...fixture_pipeline_config, transform: updated_transform }
         load_desired_config("jobs", updated_config)
       )
-      .then(cmd_apply)
+      .then(cmd_apply(false))
       .then(
         val old_color = aliases.get("jobs")
         val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
@@ -742,5 +742,129 @@ module commands_test {
           current_plans' = current_plans,
         }
       )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scenario 9: Apply with skip_backfill — user manages backfills manually
+  // ---------------------------------------------------------------------------
+
+  run test_e2e_skip_backfill_then_manual = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      // Apply with skip_backfill=true
+      .then(cmd_apply(true))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        val lp = live_pipelines.get(("jobs", color))
+        all {
+          // Sink should NOT be backfilling (we skipped it)
+          assert(not(lp.sink.backfilling)),
+          assert(lp.sink.lifecycle == SinkActive),
+          // Plan should still contain TriggerBackfill effect (for visibility)
+          assert(current_plans.forall(p => p.effects.length() == 5)),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // User can activate immediately (no backfill in progress)
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_activate("jobs", color)
+      )
+      .then(all {
+        assert("jobs".in(aliases.keys())),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+      })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scenario 10: Skip backfill, then manually trigger backfills one by one
+  // Two pipelines, user runs backfills sequentially to avoid overloading Sequin
+  // ---------------------------------------------------------------------------
+
+  run test_e2e_skip_backfill_manual_sequential = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(load_desired_config("clients", fixture_clients_config))
+      // Apply both with skip_backfill
+      .then(cmd_apply(true))
+      .then(
+        val jobs_color = deployed_color_for("jobs", live_pipelines)
+        val clients_color = deployed_color_for("clients", live_pipelines)
+        all {
+          // Neither should be backfilling
+          assert(not(live_pipelines.get(("jobs", jobs_color)).sink.backfilling)),
+          assert(not(live_pipelines.get(("clients", clients_color)).sink.backfilling)),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Manually backfill jobs first
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_backfill("jobs", color)
+      )
+      .then(
+        val jobs_color = deployed_color_for("jobs", live_pipelines)
+        val clients_color = deployed_color_for("clients", live_pipelines)
+        all {
+          // Jobs is now backfilling, clients is not
+          assert(live_pipelines.get(("jobs", jobs_color)).sink.backfilling),
+          assert(not(live_pipelines.get(("clients", clients_color)).sink.backfilling)),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Jobs backfill completes
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      // Now backfill clients
+      .then(
+        val color = deployed_color_for("clients", live_pipelines)
+        cmd_backfill("clients", color)
+      )
+      .then(
+        val clients_color = deployed_color_for("clients", live_pipelines)
+        all {
+          assert(live_pipelines.get(("clients", clients_color)).sink.backfilling),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Clients backfill completes
+      .then(
+        val color = deployed_color_for("clients", live_pipelines)
+        backfill_completes("clients", color)
+      )
+      // Now activate both
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_activate("jobs", color)
+      )
+      .then(
+        val color = deployed_color_for("clients", live_pipelines)
+        cmd_activate("clients", color)
+      )
+      .then(all {
+        assert("jobs".in(aliases.keys())),
+        assert("clients".in(aliases.keys())),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+      })
   }
 }
