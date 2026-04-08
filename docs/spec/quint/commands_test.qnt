@@ -12,18 +12,18 @@ module commands_test {
   // ---------------------------------------------------------------------------
 
   pure val fixture_sink_config: SinkConfig = {
-    id: "jobs_sink",
+    id: Sid("jobs_sink"),
     name: "jobs_sink",
     source_table: "jobs",
     destination: "opensearch",
     filters: "",
     batch_size: 100,
-    transform_id: "jobs_transform",
-    enrichment_ids: Set("jobs_enrichment"),
+    transform_id: Tid("jobs_transform"),
+    enrichment_ids: Set(Eid("jobs_enrichment")),
   }
 
   pure val fixture_index_config: IndexConfig = {
-    id: "jobs_index",
+    id: Iid("jobs_index"),
     name: "jobs",
     mappings: "{ title: text, status: keyword }",
     settings: "{ shards: 1 }",
@@ -31,7 +31,7 @@ module commands_test {
   }
 
   pure val fixture_transform_config: TransformConfig = {
-    id: "jobs_transform",
+    id: Tid("jobs_transform"),
     name: "jobs_transform",
     function_body: "fn(row) => row",
     input_schema: "{ title: string }",
@@ -39,7 +39,7 @@ module commands_test {
   }
 
   pure val fixture_enrichment_config: EnrichmentConfig = {
-    id: "jobs_enrichment",
+    id: Eid("jobs_enrichment"),
     name: "jobs_enrichment",
     source: "companies",
     join_column: "company_id",

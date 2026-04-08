@@ -134,10 +134,10 @@ module commands {
     nondet name = Set("jobs", "clients", "users").oneOf()
     load_desired_config(name, {
       name: name,
-      sink: { id: name, name: name, source_table: name, destination: "opensearch", filters: "", batch_size: 100, transform_id: name, enrichment_ids: Set(name) },
-      index: { id: name, name: name, mappings: "{}", settings: "{}", alias: name },
-      transform: { id: name, name: name, function_body: "identity", input_schema: "{}", output_schema: "{}" },
-      enrichment: { id: name, name: name, source: name, join_column: "id", enrichment_columns: "name" },
+      sink: { id: Sid(name), name: name, source_table: name, destination: "opensearch", filters: "", batch_size: 100, transform_id: Tid(name), enrichment_ids: Set(Eid(name)) },
+      index: { id: Iid(name), name: name, mappings: "{}", settings: "{}", alias: name },
+      transform: { id: Tid(name), name: name, function_body: "identity", input_schema: "{}", output_schema: "{}" },
+      enrichment: { id: Eid(name), name: name, source: name, join_column: "id", enrichment_columns: "name" },
     }),
   }
 
@@ -162,10 +162,10 @@ module commands {
     live_pipelines.keys().forall(k =>
       val lp = live_pipelines.get(k)
       and {
-        lp.sink.config.id != "",
-        lp.index.config.id != "",
-        lp.transform.config.id != "",
-        lp.enrichment.config.id != "",
+        lp.sink.config.id != Sid(""),
+        lp.index.config.id != Iid(""),
+        lp.transform.config.id != Tid(""),
+        lp.enrichment.config.id != Eid(""),
       }
     )
 

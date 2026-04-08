@@ -8,6 +8,12 @@ module types {
   type ResourceId = str
   type PipelineName = str
 
+  // Typed resource IDs — newtype wrappers to prevent mixing up IDs
+  type SinkId = Sid(str)
+  type IndexId = Iid(str)
+  type TransformId = Tid(str)
+  type EnrichmentId = Eid(str)
+
   // ---------------------------------------------------------------------------
   // Color — bounded set for model checking
   // ---------------------------------------------------------------------------
@@ -26,14 +32,14 @@ module types {
   // ---------------------------------------------------------------------------
 
   type SinkConfig = {
-    id: ResourceId,
+    id: SinkId,
     name: str,
     source_table: str,
     destination: str,
     filters: str,
     batch_size: int,
-    transform_id: ResourceId,
-    enrichment_ids: Set[ResourceId]
+    transform_id: TransformId,
+    enrichment_ids: Set[EnrichmentId]
   }
 
   type SinkStatus =
@@ -52,7 +58,7 @@ module types {
   // ---------------------------------------------------------------------------
 
   type IndexConfig = {
-    id: ResourceId,
+    id: IndexId,
     name: str,
     mappings: str,
     settings: str,
@@ -77,7 +83,7 @@ module types {
   // ---------------------------------------------------------------------------
 
   type TransformConfig = {
-    id: ResourceId,
+    id: TransformId,
     name: str,
     function_body: str,
     input_schema: str,
@@ -98,7 +104,7 @@ module types {
   // ---------------------------------------------------------------------------
 
   type EnrichmentConfig = {
-    id: ResourceId,
+    id: EnrichmentId,
     name: str,
     source: str,
     join_column: str,
@@ -168,12 +174,12 @@ module types {
     | CreateIndex(IndexConfig)
     | CreateTransform(TransformConfig)
     | CreateEnrichment(EnrichmentConfig)
-    | DeleteSink(ResourceId)
-    | DeleteIndex(ResourceId)
-    | DeleteTransform(ResourceId)
-    | DeleteEnrichment(ResourceId)
-    | TriggerBackfill(ResourceId)
-    | TriggerReindex(ResourceId)
+    | DeleteSink(SinkId)
+    | DeleteIndex(IndexId)
+    | DeleteTransform(TransformId)
+    | DeleteEnrichment(EnrichmentId)
+    | TriggerBackfill(SinkId)
+    | TriggerReindex(IndexId)
     | SwapAlias({ pipeline: PipelineName, color: Color })
 
   // ---------------------------------------------------------------------------
