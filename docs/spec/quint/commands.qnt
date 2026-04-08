@@ -168,4 +168,44 @@ module commands {
         lp.enrichment.config.id != "",
       }
     )
+
+  // ---------------------------------------------------------------------------
+  // Witnesses (liveness) — VIOLATED = good, protocol CAN reach this state
+  // ---------------------------------------------------------------------------
+
+  // Witness: a pipeline can be deployed (live state created)
+  val witness_pipeline_deployed: bool =
+    live_pipelines.keys().size() == 0
+
+  // Witness: an alias can be set (activate succeeds)
+  val witness_alias_set: bool =
+    aliases.keys().size() == 0
+
+  // Witness: a colored variant can be dropped
+  val witness_color_dropped: bool =
+    // True when no drop has happened — if violated, drop is reachable
+    // A drop means: a pipeline exists in desired but has fewer live colors than were created
+    live_pipelines.keys().size() == 0 or
+    desired_pipelines.keys().forall(p =>
+      ALL_COLORS.forall(c =>
+        not((p, c).in(live_pipelines.keys())) or p.in(aliases.keys())
+      )
+    )
+
+  // Witness: backfill can complete
+  val witness_backfill_completes: bool =
+    not(live_pipelines.keys().exists(k =>
+      live_pipelines.get(k).sink.status == SinkActive
+    ))
+
+  // Witness: a full cycle can complete (deploy, backfill, activate, drop old)
+  val witness_full_cycle: bool =
+    not(
+      aliases.keys().size() > 0 and
+      live_pipelines.keys().size() > 0 and
+      aliases.keys().exists(p =>
+        val alias_color = aliases.get(p)
+        ALL_COLORS.exists(c2 => c2 != alias_color and not((p, c2).in(live_pipelines.keys())))
+      )
+    )
 }
