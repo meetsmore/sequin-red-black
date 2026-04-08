@@ -1,29 +1,42 @@
+// srb: compile per-pipeline config directories into a compiled Sequin config
 module srb {
 
-  // A "red-blackified" group of sink/index/enrichment/transformation.
-  type ManagedNode = {
-    // The name of the node: "jobs_red"
-    name: str, 
-    // The Sequin sink: "jobs_red_sink"
-    sink: str,
-    // The OpenSearch index: "jobs_red"
-    index: str,
-    // The Sequin enrichment function. "jobs_red_enrichment"
-    enrichment: str,
-    // The Sequin transformation function. "jobs_red_transformation"
-    transformation: str
+  import types.* from "./docs/spec/quint/types"
+
+  // ---------------------------------------------------------------------------
+  // Per-pipeline config (as authored by users in config directories)
+  // ---------------------------------------------------------------------------
+
+  type UserPipelineConfig = {
+    name: PipelineName,
+    sink: SinkConfig,
+    index: IndexConfig,
+    transform: TransformConfig,
+    enrichment: EnrichmentConfig
   }
 
-  // Defines a resource and any current managed nodes that relate to it.
-  // A resource might be "jobs" and the managed nodes might be "jobs_red" or "jobs_black" and the associated resources.
-  type Node = {
-    base: str,
-    nodes: Set[ManagedNode]
+  // ---------------------------------------------------------------------------
+  // Compiled config (output of compile, input to plan/apply)
+  // ---------------------------------------------------------------------------
+
+  type CompiledConfig = {
+    pipelines: PipelineName -> PipelineConfig
   }
 
-  pure val sinks = Set();
-  pure val indexes = Set();
-  pure val enrichments = Set();
-  pure val transformations = Set();
-  
+  // ---------------------------------------------------------------------------
+  // Compile: merge per-pipeline configs into one compiled config
+  // This is a pure function — no side effects, no live state
+  // ---------------------------------------------------------------------------
+
+  pure def compile(user_configs: Set[UserPipelineConfig]): CompiledConfig = {
+    pipelines: user_configs.fold(Map(), (acc, cfg) =>
+      acc.put(cfg.name, {
+        name: cfg.name,
+        sink: cfg.sink,
+        index: cfg.index,
+        transform: cfg.transform,
+        enrichment: cfg.enrichment,
+      })
+    )
+  }
 }
