@@ -45,6 +45,10 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...opts?.headers },
   });
   if (res.status === 204) return undefined as T;
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `API error: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -70,10 +74,14 @@ function JobsTab({ divisions }: { divisions: Division[] }) {
   const [newJob, setNewJob] = useState<Row>({ title: "", slug: "", divisionId: "", expectedOrderAmount: "" });
 
   const load = useCallback(async () => {
-    const rows = await api<Row[]>("/api/tables/Job");
-    const divs = await api<Division[]>("/api/tables/Division");
-    const divMap = Object.fromEntries(divs.map(d => [d.id, d.name]));
-    setJobs(rows.map(r => ({ ...r, division_name: divMap[r.divisionId as number] ?? "" })));
+    try {
+      const rows = await api<Row[]>("/api/tables/Job");
+      const divs = await api<Division[]>("/api/tables/Division");
+      const divMap = Object.fromEntries(divs.map(d => [d.id, d.name]));
+      setJobs(rows.map(r => ({ ...r, division_name: divMap[r.divisionId as number] ?? "" })));
+    } catch {
+      setJobs([]);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -191,7 +199,11 @@ function ClientsTab() {
   const [newClient, setNewClient] = useState<Row>({ name: "", companyName: "", phone: "", email: "", isCompany: false });
 
   const load = useCallback(async () => {
-    setClients(await api<Row[]>("/api/tables/Client"));
+    try {
+      setClients(await api<Row[]>("/api/tables/Client"));
+    } catch {
+      setClients([]);
+    }
   }, []);
 
   useEffect(() => { load(); }, [load]);
