@@ -133,4 +133,24 @@ describe("apply", () => {
       expect(indexNames.some((n) => n.startsWith("clients_"))).toBe(true);
     });
   });
+
+  describe("retry after partial failure", () => {
+    test("apply succeeds when OS index already exists from a previous failed apply", async () => {
+      await writeCompiled(COMPILED_PATH, [jobsConfig]);
+
+      // Simulate a partial failure: OS index was created but Sequin apply failed
+      await testOS.createIndex("jobs_red", {
+        mappings: jobsConfig.index.mappings,
+        settings: jobsConfig.index.settings,
+      });
+
+      // Apply should succeed despite the index already existing
+      const apply = await runSRB("online", "apply", "--auto-approve");
+      expect(apply.exitCode).toBe(0);
+
+      // Verify resources were created
+      const sinks = await testSequin.listSinks();
+      expect(sinks.some((s) => s.name === "jobs_red")).toBe(true);
+    });
+  });
 });
