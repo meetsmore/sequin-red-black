@@ -46,7 +46,7 @@ lsof -ti :3000 | xargs kill -9 2>/dev/null || true
 sleep 0.5
 
 cd example/webapp
-bun install --silent 2>/dev/null || true
+bun install
 bun run server.ts &
 WEBAPP_PID=$!
 disown $WEBAPP_PID
