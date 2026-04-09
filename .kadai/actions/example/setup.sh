@@ -37,21 +37,26 @@ echo ""
 echo "=== Compiling srb config ==="
 cd srb
 bun run src/cli.ts offline compile --indexes ../example/indexes --out /tmp/srb-example-compiled.json
+cd ..
 
 echo ""
 echo "=== Starting webapp ==="
-echo "Launching webapp at http://localhost:3000"
-cd ../example/webapp
+# Kill any previous webapp instance on port 3000
+lsof -ti :3000 | xargs kill -9 2>/dev/null || true
+sleep 0.5
+
+cd example/webapp
 bun install --silent 2>/dev/null || true
 bun run server.ts &
 WEBAPP_PID=$!
-echo "Webapp PID: $WEBAPP_PID"
+disown $WEBAPP_PID
+echo "Webapp started (PID: $WEBAPP_PID) at http://localhost:3000"
 
 echo ""
 echo "=== Setup complete ==="
 echo ""
 echo "Services:"
-echo "  Sequin:     http://localhost:7376"
+echo "  Sequin:      http://localhost:7376"
 echo "  OpenSearch:  http://localhost:9200"
 echo "  Postgres:    localhost:7377"
 echo "  Webapp:      http://localhost:3000"
