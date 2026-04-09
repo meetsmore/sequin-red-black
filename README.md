@@ -33,33 +33,172 @@ Each pipeline bundles four resources:
 - **Transform** — Elixir function that shapes each record
 - **Enrichment** — SQL query that joins additional data
 
-## Quick start
+## Example walkthrough
 
-Prerequisites: [Bun](https://bun.sh), [Docker](https://docker.com), [Sequin CLI](https://sequinstream.com/docs/cli)
+This walks through a complete red-black deployment using the included example stack.
+
+### Prerequisites
+
+- [Bun](https://bun.sh)
+- [Docker](https://docker.com)
+- [Sequin CLI](https://sequinstream.com/docs/cli)
+
+### 1. Start the stack
 
 ```bash
-# 1. Start the example stack (Postgres, Sequin, OpenSearch, webapp)
 bunx kadai run example/setup
-
-# 2. See what srb would create
-bunx kadai run example/plan
-
-# 3. Deploy pipelines
-bunx kadai run example/apply
-
-# 4. Activate a pipeline (point alias to colored index)
-PIPELINE=jobs COLOR=red bunx kadai run example/activate
-
-# 5. Make a change, deploy new color, swap, drop old
-#    (edit example/indexes/jobs/transform.ex, then:)
-bunx kadai run example/apply
-PIPELINE=jobs COLOR=black bunx kadai run example/activate
-PIPELINE=jobs COLOR=red bunx kadai run example/drop
 ```
 
-The webapp at http://localhost:3000 reads from OpenSearch via the alias, so the swap is invisible to users.
+This starts Postgres, Redis, Sequin, OpenSearch, and a demo webapp. Once complete you'll see:
 
-## CLI usage
+```
+Services:
+  Sequin:      http://localhost:7376  (admin@example.com / sequinpassword!)
+  OpenSearch:  http://localhost:9200
+  Postgres:    localhost:7377  (postgres / postgres)
+  Webapp:      http://localhost:3000
+```
+
+The Postgres database comes pre-loaded with sample Jobs, Clients, and Divisions.
+
+### 2. Deploy the initial pipelines
+
+First, see what `srb` would do:
+
+```bash
+bunx kadai run example/plan
+```
+
+This compiles the pipeline configs in `example/indexes/` and diffs them against live state. Since nothing is deployed yet, you'll see two "new pipeline" plans (jobs + clients) with all-green `+` lines showing the full config.
+
+Apply the plan:
+
+```bash
+bunx kadai run example/apply
+```
+
+This creates the OpenSearch indices (`jobs_red`, `clients_red`), Sequin sinks, transforms, and enrichments, then triggers backfills to sync data from Postgres.
+
+### 3. Activate the pipelines
+
+The indices exist but the OpenSearch aliases aren't set yet. Activate them:
+
+```bash
+bunx kadai run example/activate
+# Enter: jobs, red
+
+bunx kadai run example/activate
+# Enter: clients, red
+```
+
+### 4. View data in the webapp
+
+Open http://localhost:3000. You'll see:
+
+- **Jobs tab** — 10 jobs synced from Postgres through Sequin to OpenSearch, read via the `jobs` alias
+- **Clients tab** — 5 clients, same pipeline
+- **Indexes tab** — shows `jobs_red` and `clients_red` with doc counts and alias assignments
+- **Search tab** — full-text search across OpenSearch indices
+
+The webapp reads from OpenSearch (via aliases) and writes to Postgres. Sequin CDC syncs changes automatically — try adding a job in the webapp and watching it appear.
+
+### 5. Make a config change
+
+Edit a transform to change how data flows. For example, modify the jobs transform:
+
+```bash
+# example/indexes/jobs/transform.ex
+```
+
+Change the transform body — add a field, rename something, change the enrichment logic. Or modify `example/indexes/jobs/index.ts` to change the OpenSearch mappings.
+
+### 6. Plan the update
+
+```bash
+bunx kadai run example/plan
+```
+
+`srb` detects the change and shows a unified diff of what changed, what strategy it will use, and what effects it will apply:
+
+```
+Pipeline: jobs
+  Strategy: backfill (transform/enrichment/data changed)
+  Target color: black
+  Current color: red
+
+  Changes:
+    ~ transform "jobs-transform"
+        ~ functionBody:
+            @@ -1,3 +1,3 @@
+             def transform(_action, record, _changes, _metadata) do
+            -  record
+            +  Map.put(record, "processed", true)
+             end
+
+  Effects:
+    + create index "jobs_black"
+    + create function "jobs_black-transform"
+    + create function "jobs_black-enrichment"
+    + create sink "jobs_black"
+    ~ trigger backfill on "jobs_black"
+```
+
+The strategy depends on what changed:
+- **Transform/enrichment/data fields** → full backfill (new color, re-sync from Postgres)
+- **Index mappings/settings only** → reindex (new color, copy from old index)
+- **Operational fields only** (e.g. batch_size) → in-place update (no new color)
+
+### 7. Apply the update
+
+```bash
+bunx kadai run example/apply
+```
+
+This creates `jobs_black` alongside the existing `jobs_red`. Both are running simultaneously — the alias still points to red, so the webapp sees no change.
+
+You can verify in the Sequin UI at http://localhost:7376 — you'll see both `jobs_red` and `jobs_black` sinks.
+
+### 8. Activate the new color
+
+Once the backfill completes (check sink status in Sequin UI), swap the alias:
+
+```bash
+bunx kadai run example/activate
+# Enter: jobs, black
+```
+
+This atomically points the `jobs` alias from `jobs_red` to `jobs_black`. The webapp instantly reads from the new index — zero downtime.
+
+### 9. Drop the old color
+
+The old `jobs_red` is no longer serving traffic. Clean it up:
+
+```bash
+bunx kadai run example/drop
+# Enter: jobs, red
+```
+
+This deletes the `jobs_red` sink, transform, enrichment, and OpenSearch index.
+
+### 10. Verify
+
+```bash
+bunx kadai run example/plan
+```
+
+Should show: `No changes. Infrastructure is up to date.`
+
+Only `jobs_black` remains. The next deployment will create `jobs_red` again (or whichever color is available).
+
+### Teardown
+
+```bash
+bunx kadai run example/teardown
+```
+
+Stops all Docker containers and removes volumes.
+
+## CLI reference
 
 ```bash
 cd srb && bun install
