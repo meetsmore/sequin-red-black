@@ -33,7 +33,6 @@ export default {
           name: { type: "text" },
         },
       },
-      owner: { type: "text" },
     },
   },
 };

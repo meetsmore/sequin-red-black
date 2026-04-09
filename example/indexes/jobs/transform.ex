@@ -15,7 +15,6 @@ def transform(_action, record, _changes, metadata) do
     "cancelledAt" => record["cancelledAt"],
     "createdAt" => record["createdAt"],
     "updatedAt" => record["updatedAt"],
-    "division" => enrich["division"],
-    "owner" => record["owner"]
+    "division" => enrich["division"]
   }
 end
