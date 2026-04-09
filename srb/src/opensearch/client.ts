@@ -81,6 +81,8 @@ export class OpenSearchClient {
     name: string,
     body: { mappings: Record<string, unknown>; settings: Record<string, unknown> },
   ): Promise<void> {
+    // Delete first if exists — makes apply idempotent after partial failures
+    await this.deleteIndex(name);
     const res = await this.fetch(`/${name}`, {
       method: "PUT",
       body: JSON.stringify(body),
