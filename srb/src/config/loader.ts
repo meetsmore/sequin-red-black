@@ -70,14 +70,14 @@ export async function loadPipeline(name: string, indexesDir: string): Promise<Pi
     transform: {
       id: transformYaml.name,
       name: transformYaml.name,
-      functionBody: transformBody,
+      functionBody: transformBody.trim(),
       inputSchema: "{}",
       outputSchema: "{}",
     },
     enrichment: {
       id: enrichmentYaml.name,
       name: enrichmentYaml.name,
-      source: enrichmentSql,
+      source: enrichmentSql.trim(),
       joinColumn: "",
       enrichmentColumns: "",
     },

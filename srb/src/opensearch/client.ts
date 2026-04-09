@@ -56,26 +56,45 @@ export class OpenSearchClient {
     return data[name]?.mappings ?? {};
   }
 
-  async getIndexSettings(name: string, desiredKeys?: string[]): Promise<Record<string, unknown>> {
+  /**
+   * Get user-configurable index settings, excluding OpenSearch internal metadata.
+   * Returns settings in the same structure as the create index API expects.
+   */
+  async getIndexSettings(name: string): Promise<Record<string, unknown>> {
     const res = await this.fetch(`/${name}/_settings`);
     if (!res.ok) return {};
-    const data = (await res.json()) as Record<string, { settings?: { index?: Record<string, unknown> } }>;
-    const settings = data[name]?.settings?.index ?? {};
-    // Only return settings that were in the desired config to avoid false diffs
-    // from auto-assigned defaults like number_of_shards
-    if (desiredKeys && desiredKeys.length > 0) {
-      const result: Record<string, unknown> = {};
-      for (const key of desiredKeys) {
-        if (key in (settings as Record<string, unknown>)) {
-          result[key] = (settings as Record<string, unknown>)[key];
-        }
-      }
-      return result;
-    }
-    // Fallback: return common user-settable fields
-    const idx = settings as Record<string, unknown>;
+    const data = (await res.json()) as Record<string, { settings?: Record<string, unknown> }>;
+    const indexSettings = ((data[name]?.settings ?? {}) as Record<string, unknown>).index as Record<string, unknown> | undefined;
+    if (!indexSettings) return {};
+
+    // Internal fields to exclude — these are auto-managed by OpenSearch
+    const internalKeys = new Set([
+      "creation_date", "uuid", "version", "provided_name",
+      "number_of_shards", "replication",
+    ]);
+    // Settings that should stay at top level (not nested under index.*)
+    const topLevelKeys = new Set(["number_of_replicas"]);
+
     const result: Record<string, unknown> = {};
-    if (idx.number_of_replicas !== undefined) result.number_of_replicas = idx.number_of_replicas;
+    for (const [key, value] of Object.entries(indexSettings)) {
+      if (internalKeys.has(key)) continue;
+      // Nest scalar index settings under "index" to match desired config format
+      // e.g. { max_result_window: "100000" } → { index: { max_result_window: 100000 } }
+      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        if (topLevelKeys.has(key)) {
+          // Keep at top level to match how users typically set these
+          result[key] = value;
+        } else {
+          if (!result.index) result.index = {};
+          // Coerce numeric strings to numbers for comparison
+          (result.index as Record<string, unknown>)[key] = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+        }
+      } else if (typeof value === "object" && value !== null) {
+        // Complex settings like analysis go at top level
+        result[key] = value;
+      }
+    }
+
     return result;
   }
 
