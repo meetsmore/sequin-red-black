@@ -1,3 +1,17 @@
+/** Recursively coerce numeric strings to numbers in an object tree */
+function deepCoerceNumbers(obj: unknown): unknown {
+  if (typeof obj === "string" && /^\d+$/.test(obj)) return Number(obj);
+  if (Array.isArray(obj)) return obj.map(deepCoerceNumbers);
+  if (obj && typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      result[k] = deepCoerceNumbers(v);
+    }
+    return result;
+  }
+  return obj;
+}
+
 export class OpenSearchClient {
   constructor(
     private baseUrl: string,
@@ -57,42 +71,54 @@ export class OpenSearchClient {
   }
 
   /**
-   * Get user-configurable index settings, excluding OpenSearch internal metadata.
-   * Returns settings in the same structure as the create index API expects.
+   * Get index settings, filtered to only include keys present in desiredSettings.
+   * This avoids false diffs from OS defaults (number_of_replicas, etc.) that
+   * weren't explicitly set by the user.
    */
-  async getIndexSettings(name: string): Promise<Record<string, unknown>> {
+  async getIndexSettings(name: string, desiredSettings?: Record<string, unknown>): Promise<Record<string, unknown>> {
     const res = await this.fetch(`/${name}/_settings`);
     if (!res.ok) return {};
     const data = (await res.json()) as Record<string, { settings?: Record<string, unknown> }>;
     const indexSettings = ((data[name]?.settings ?? {}) as Record<string, unknown>).index as Record<string, unknown> | undefined;
     if (!indexSettings) return {};
 
-    // Internal fields to exclude — these are auto-managed by OpenSearch
-    const internalKeys = new Set([
-      "creation_date", "uuid", "version", "provided_name",
-      "number_of_shards", "replication",
-    ]);
-    // Settings that should stay at top level (not nested under index.*)
-    const topLevelKeys = new Set(["number_of_replicas"]);
+    // Only return settings whose keys exist in the desired config.
+    // This prevents false diffs from OS defaults like number_of_replicas.
+    const desiredKeys = desiredSettings ? new Set(Object.keys(desiredSettings)) : null;
 
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(indexSettings)) {
-      if (internalKeys.has(key)) continue;
-      // Nest scalar index settings under "index" to match desired config format
-      // e.g. { max_result_window: "100000" } → { index: { max_result_window: 100000 } }
+      // Skip if not in desired config (when desired is provided)
+      if (desiredKeys && !desiredKeys.has(key)) continue;
+
       if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        if (topLevelKeys.has(key)) {
-          // Keep at top level to match how users typically set these
-          result[key] = value;
+        // Match type to desired value for accurate comparison.
+        // OS stores numbers as strings (e.g. "0"), desired may have string "0" or number 0.
+        const desiredVal = desiredSettings?.[key];
+        if (desiredVal !== undefined && typeof desiredVal === "string") {
+          result[key] = String(value);
+        } else if (typeof value === "string" && /^\d+$/.test(value)) {
+          result[key] = Number(value);
         } else {
-          if (!result.index) result.index = {};
-          // Coerce numeric strings to numbers for comparison
-          (result.index as Record<string, unknown>)[key] = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+          result[key] = value;
         }
       } else if (typeof value === "object" && value !== null) {
-        // Complex settings like analysis go at top level
-        result[key] = value;
+        result[key] = deepCoerceNumbers(value);
       }
+    }
+
+    // Handle nested "index" key from desired: { index: { max_result_window: 100000 } }
+    // OS stores these flat under index.*, so we need to pick them out
+    if (desiredKeys?.has("index") && desiredSettings?.index) {
+      const desiredIdx = desiredSettings.index as Record<string, unknown>;
+      const resultIdx: Record<string, unknown> = {};
+      for (const subKey of Object.keys(desiredIdx)) {
+        if (subKey in indexSettings) {
+          const v = indexSettings[subKey];
+          resultIdx[subKey] = typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v;
+        }
+      }
+      if (Object.keys(resultIdx).length > 0) result.index = resultIdx;
     }
 
     return result;

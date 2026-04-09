@@ -2,6 +2,7 @@ import type {
   Color,
   PipelineKey,
   LivePipelineState,
+  PipelineConfig,
   SinkConfig,
   IndexConfig,
   TransformConfig,
@@ -44,6 +45,7 @@ export async function discoverLiveState(
   sequinCli: SequinCLI,
   sequinApi: SequinAPI,
   os: OpenSearchClient,
+  desired?: Map<string, PipelineConfig>,
 ): Promise<LiveState> {
   // Fetch data in parallel
   const [exportedConfig, sinkInfos, osIndices] = await Promise.all([
@@ -136,9 +138,11 @@ export async function discoverLiveState(
       const osIndex = osIndexByName.get(indexName);
 
       // Fetch actual mappings/settings from OpenSearch for accurate comparison
+      // Pass desired settings to filter out OS defaults that weren't explicitly set
+      const desiredCfg = desired?.get(pipeline);
       const [actualMappings, actualSettings] = await Promise.all([
         os.getIndexMappings(indexName),
-        os.getIndexSettings(indexName),
+        os.getIndexSettings(indexName, desiredCfg?.index.settings),
       ]);
 
       // Keep colored index name as ID (needed for delete/reindex),

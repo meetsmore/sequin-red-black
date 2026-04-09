@@ -7,7 +7,7 @@ import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
 export async function planCommand(opts: OnlineOptions & { output?: string }): Promise<void> {
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
   const desired = await loadCompiled(opts.compiled);
-  const liveState = await discoverLiveState(sequinCli, sequinApi, openSearch);
+  const liveState = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
   const plans = generatePlans(desired, liveState.pipelines, ALL_COLORS);
 
   if (plans.length === 0) {

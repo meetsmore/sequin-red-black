@@ -1,6 +1,7 @@
 // Terraform/sequin-style plan formatter
 // Shows config diffs and planned effects in a human-readable format.
 
+import { createTwoFilesPatch } from "diff";
 import type {
   Color,
   PipelineConfig,
@@ -43,131 +44,122 @@ function bold(s: string): string { return `${BOLD}${s}${RESET}`; }
 function dim(s: string): string { return `${DIM}${s}${RESET}`; }
 
 // ---------------------------------------------------------------------------
-// Field diff helpers
+// Diff helpers
 // ---------------------------------------------------------------------------
 
-interface FieldDiff {
-  field: string;
-  old: string;
-  new_: string;
+function sortedPretty(obj: unknown): string {
+  return JSON.stringify(JSON.parse(sortedStringify(obj)), null, 2);
 }
 
-function diffScalar(field: string, desired: unknown, live: unknown): FieldDiff | null {
-  const d = typeof desired === "string" ? desired : JSON.stringify(desired);
-  const l = typeof live === "string" ? live : JSON.stringify(live);
-  if (d === l) return null;
-  return { field, old: l, new_: d };
+function scalarStr(v: unknown): string {
+  if (typeof v === "string") return v;
+  return JSON.stringify(v);
 }
 
-function diffJson(field: string, desired: unknown, live: unknown): FieldDiff | null {
-  const d = sortedStringify(desired);
-  const l = sortedStringify(live);
-  if (d === l) return null;
-  return { field, old: l, new_: d };
-}
-
-function formatFieldDiff(diff: FieldDiff, indent: string): string {
-  const lines: string[] = [];
-  // For multiline values (code), show inline diff
-  if (diff.old.includes("\n") || diff.new_.includes("\n")) {
-    lines.push(`${indent}${yellow("~")} ${bold(diff.field)}:`);
-    for (const line of diff.old.split("\n")) {
-      lines.push(`${indent}    ${red("- " + line)}`);
+/** Produce a colored unified diff, skipping the header lines */
+function unifiedDiff(label: string, oldStr: string, newStr: string, indent: string): string {
+  const patch = createTwoFilesPatch("live", "desired", oldStr + "\n", newStr + "\n", "", "", { context: 3 });
+  const lines = patch.split("\n");
+  // Skip the first 4 header lines (===, ---, +++, @@)
+  const result: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("===") || line.startsWith("---") || line.startsWith("+++")) continue;
+    if (line.startsWith("@@")) {
+      // Show hunk header dimmed
+      result.push(`${indent}${dim(line)}`);
+    } else if (line.startsWith("-")) {
+      result.push(`${indent}${red(line)}`);
+    } else if (line.startsWith("+")) {
+      result.push(`${indent}${green(line)}`);
+    } else if (line.startsWith("\\")) {
+      continue; // "No newline at end of file"
+    } else if (line.length > 0) {
+      result.push(`${indent} ${line.slice(1)}`);
     }
-    for (const line of diff.new_.split("\n")) {
-      lines.push(`${indent}    ${green("+ " + line)}`);
-    }
-  } else {
-    lines.push(`${indent}${yellow("~")} ${bold(diff.field)}: ${red(diff.old)} → ${green(diff.new_)}`);
   }
-  return lines.join("\n");
+  return result.join("\n");
 }
 
-function formatNewField(field: string, value: string, indent: string): string {
-  if (value.includes("\n")) {
-    const lines = [`${indent}${green("+")} ${bold(field)}:`];
-    for (const line of value.split("\n")) {
-      lines.push(`${indent}    ${green("+ " + line)}`);
-    }
-    return lines.join("\n");
+// ---------------------------------------------------------------------------
+// Field comparison — produces a diff section for each resource
+// ---------------------------------------------------------------------------
+
+interface ResourceDiff {
+  resourceType: string;
+  resourceName: string;
+  fieldDiffs: { field: string; diffText: string }[];
+}
+
+function diffField(field: string, desired: unknown, live: unknown, indent: string): { field: string; diffText: string } | null {
+  const dStr = scalarStr(desired);
+  const lStr = scalarStr(live);
+  if (dStr === lStr) return null;
+
+  // For short scalar values, show inline
+  if (!dStr.includes("\n") && !lStr.includes("\n") && dStr.length < 60 && lStr.length < 60) {
+    return { field, diffText: `${indent}${yellow("~")} ${bold(field)}: ${red(lStr)} → ${green(dStr)}` };
   }
-  return `${indent}${green("+")} ${bold(field)}: ${green(value)}`;
+
+  // For longer values, use unified diff
+  const header = `${indent}${yellow("~")} ${bold(field)}:`;
+  const body = unifiedDiff(field, lStr, dStr, indent + "    ");
+  return { field, diffText: header + "\n" + body };
+}
+
+function diffJsonField(field: string, desired: unknown, live: unknown, indent: string): { field: string; diffText: string } | null {
+  if (sortedStringify(desired) === sortedStringify(live)) return null;
+  const dStr = sortedPretty(desired);
+  const lStr = sortedPretty(live);
+
+  const header = `${indent}${yellow("~")} ${bold(field)}:`;
+  const body = unifiedDiff(field, lStr, dStr, indent + "    ");
+  return { field, diffText: header + "\n" + body };
+}
+
+function diffSinkResource(desired: PipelineConfig, live: LivePipelineState, indent: string): ResourceDiff | null {
+  const diffs: { field: string; diffText: string }[] = [];
+  const d = (field: string, dv: unknown, lv: unknown) => {
+    const r = diffField(field, dv, lv, indent + "    ");
+    if (r) diffs.push(r);
+  };
+  d("sourceTable", desired.sink.sourceTable, live.sink.config.sourceTable);
+  d("destination", desired.sink.destination, live.sink.config.destination);
+  d("filters", desired.sink.filters, live.sink.config.filters);
+  d("batchSize", desired.sink.batchSize, live.sink.config.batchSize);
+  d("transformId", desired.sink.transformId, live.sink.config.transformId);
+
+  if (diffs.length === 0) return null;
+  return { resourceType: "sink", resourceName: desired.name, fieldDiffs: diffs };
+}
+
+function diffIndexResource(desired: PipelineConfig, live: LivePipelineState, indent: string): ResourceDiff | null {
+  const diffs: { field: string; diffText: string }[] = [];
+  const d = diffJsonField("mappings", desired.index.mappings, live.index.config.mappings, indent + "    ");
+  if (d) diffs.push(d);
+  const d2 = diffJsonField("settings", desired.index.settings, live.index.config.settings, indent + "    ");
+  if (d2) diffs.push(d2);
+  if (diffs.length === 0) return null;
+  return { resourceType: "index", resourceName: desired.name, fieldDiffs: diffs };
+}
+
+function diffTransformResource(desired: PipelineConfig, live: LivePipelineState, indent: string): ResourceDiff | null {
+  const diffs: { field: string; diffText: string }[] = [];
+  const d = diffField("functionBody", desired.transform.functionBody, live.transform.config.functionBody, indent + "    ");
+  if (d) diffs.push(d);
+  if (diffs.length === 0) return null;
+  return { resourceType: "transform", resourceName: desired.transform.name, fieldDiffs: diffs };
+}
+
+function diffEnrichmentResource(desired: PipelineConfig, live: LivePipelineState, indent: string): ResourceDiff | null {
+  const diffs: { field: string; diffText: string }[] = [];
+  const d = diffField("source", desired.enrichment.source, live.enrichment.config.source, indent + "    ");
+  if (d) diffs.push(d);
+  if (diffs.length === 0) return null;
+  return { resourceType: "enrichment", resourceName: desired.enrichment.name, fieldDiffs: diffs };
 }
 
 // ---------------------------------------------------------------------------
-// Diff a resource config (desired vs live)
-// ---------------------------------------------------------------------------
-
-function diffSink(desired: PipelineConfig["sink"], live: PipelineConfig["sink"]): FieldDiff[] {
-  const diffs: FieldDiff[] = [];
-  const d = diffScalar("sourceTable", desired.sourceTable, live.sourceTable); if (d) diffs.push(d);
-  const d2 = diffScalar("destination", desired.destination, live.destination); if (d2) diffs.push(d2);
-  const d3 = diffScalar("filters", desired.filters, live.filters); if (d3) diffs.push(d3);
-  const d4 = diffScalar("batchSize", desired.batchSize, live.batchSize); if (d4) diffs.push(d4);
-  const d5 = diffScalar("transformId", desired.transformId, live.transformId); if (d5) diffs.push(d5);
-  const d6 = diffJson("enrichmentIds", desired.enrichmentIds, live.enrichmentIds); if (d6) diffs.push(d6);
-  return diffs;
-}
-
-function diffIndex(desired: PipelineConfig["index"], live: PipelineConfig["index"]): FieldDiff[] {
-  const diffs: FieldDiff[] = [];
-  const d = diffJson("mappings", desired.mappings, live.mappings); if (d) diffs.push(d);
-  const d2 = diffJson("settings", desired.settings, live.settings); if (d2) diffs.push(d2);
-  return diffs;
-}
-
-function diffTransform(desired: PipelineConfig["transform"], live: PipelineConfig["transform"]): FieldDiff[] {
-  const diffs: FieldDiff[] = [];
-  const d = diffScalar("functionBody", desired.functionBody, live.functionBody); if (d) diffs.push(d);
-  const d2 = diffScalar("inputSchema", desired.inputSchema, live.inputSchema); if (d2) diffs.push(d2);
-  const d3 = diffScalar("outputSchema", desired.outputSchema, live.outputSchema); if (d3) diffs.push(d3);
-  return diffs;
-}
-
-function diffEnrichment(desired: PipelineConfig["enrichment"], live: PipelineConfig["enrichment"]): FieldDiff[] {
-  const diffs: FieldDiff[] = [];
-  const d = diffScalar("source", desired.source, live.source); if (d) diffs.push(d);
-  const d2 = diffScalar("joinColumn", desired.joinColumn, live.joinColumn); if (d2) diffs.push(d2);
-  const d3 = diffScalar("enrichmentColumns", desired.enrichmentColumns, live.enrichmentColumns); if (d3) diffs.push(d3);
-  return diffs;
-}
-
-// ---------------------------------------------------------------------------
-// Format a single resource section
-// ---------------------------------------------------------------------------
-
-function formatResourceDiff(
-  symbol: string, // "+", "~", "-"
-  resourceType: string,
-  resourceName: string,
-  diffs: FieldDiff[],
-  indent: string,
-): string {
-  const lines: string[] = [];
-  const colorFn = symbol === "+" ? green : symbol === "-" ? red : yellow;
-  lines.push(`${indent}${colorFn(symbol)} ${bold(resourceType)} ${cyan(`"${resourceName}"`)}`);
-  for (const diff of diffs) {
-    lines.push(formatFieldDiff(diff, indent + "    "));
-  }
-  return lines.join("\n");
-}
-
-function formatNewResource(
-  resourceType: string,
-  resourceName: string,
-  fields: [string, string][],
-  indent: string,
-): string {
-  const lines: string[] = [];
-  lines.push(`${indent}${green("+")} ${bold(resourceType)} ${cyan(`"${resourceName}"`)}`);
-  for (const [field, value] of fields) {
-    lines.push(formatNewField(field, value, indent + "    "));
-  }
-  return lines.join("\n");
-}
-
-// ---------------------------------------------------------------------------
-// Format an effect
+// Format effect
 // ---------------------------------------------------------------------------
 
 function formatEffect(effect: Effect, pipeline: string, color: Color): string {
@@ -198,6 +190,35 @@ function formatEffect(effect: Effect, pipeline: string, color: Color): string {
     case "SwapAlias":
       return `${yellow("~")} swap alias ${cyan(`"${effect.pipeline}"`)} → ${cyan(`"${colored}"`)}`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Format new resource (for create plans)
+// ---------------------------------------------------------------------------
+
+function formatNewField(field: string, value: string, indent: string): string {
+  if (value.includes("\n")) {
+    const lines = [`${indent}${green("+")} ${bold(field)}:`];
+    for (const line of value.split("\n")) {
+      lines.push(`${indent}    ${green("+ " + line)}`);
+    }
+    return lines.join("\n");
+  }
+  return `${indent}${green("+")} ${bold(field)}: ${green(value)}`;
+}
+
+function formatNewResource(
+  resourceType: string,
+  resourceName: string,
+  fields: [string, string][],
+  indent: string,
+): string {
+  const lines: string[] = [];
+  lines.push(`${indent}${green("+")} ${bold(resourceType)} ${cyan(`"${resourceName}"`)}`);
+  for (const [field, value] of fields) {
+    lines.push(formatNewField(field, value, indent + "    "));
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -267,26 +288,21 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
         ["source", desired.enrichment.source],
       ], "    "));
     } else if (kind === "update" && desired && live) {
-      const sinkDiffs = diffSink(desired.sink, live.sink.config);
-      const indexDiffs = diffIndex(desired.index, live.index.config);
-      const transformDiffs = diffTransform(desired.transform, live.transform.config);
-      const enrichmentDiffs = diffEnrichment(desired.enrichment, live.enrichment.config);
+      const indent = "    ";
+      const resourceDiffs: ResourceDiff[] = [];
+      const sd = diffSinkResource(desired, live, indent); if (sd) resourceDiffs.push(sd);
+      const id = diffIndexResource(desired, live, indent); if (id) resourceDiffs.push(id);
+      const td = diffTransformResource(desired, live, indent); if (td) resourceDiffs.push(td);
+      const ed = diffEnrichmentResource(desired, live, indent); if (ed) resourceDiffs.push(ed);
 
-      const hasDiffs = sinkDiffs.length + indexDiffs.length + transformDiffs.length + enrichmentDiffs.length > 0;
-      if (hasDiffs) {
+      if (resourceDiffs.length > 0) {
         lines.push("");
         lines.push(dim("  Changes:"));
-        if (sinkDiffs.length > 0) {
-          lines.push(formatResourceDiff("~", "sink", desired.name, sinkDiffs, "    "));
-        }
-        if (indexDiffs.length > 0) {
-          lines.push(formatResourceDiff("~", "index", desired.name, indexDiffs, "    "));
-        }
-        if (transformDiffs.length > 0) {
-          lines.push(formatResourceDiff("~", "transform", desired.transform.name, transformDiffs, "    "));
-        }
-        if (enrichmentDiffs.length > 0) {
-          lines.push(formatResourceDiff("~", "enrichment", desired.enrichment.name, enrichmentDiffs, "    "));
+        for (const rd of resourceDiffs) {
+          lines.push(`${indent}${yellow("~")} ${bold(rd.resourceType)} ${cyan(`"${rd.resourceName}"`)}`);
+          for (const fd of rd.fieldDiffs) {
+            lines.push(fd.diffText);
+          }
         }
       }
     }
