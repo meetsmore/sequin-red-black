@@ -174,12 +174,13 @@ module types {
     | CreateIndex(IndexConfig)
     | CreateTransform(TransformConfig)
     | CreateEnrichment(EnrichmentConfig)
+    | UpdateSink({ id: SinkId, config: SinkConfig })
     | DeleteSink(SinkId)
     | DeleteIndex(IndexId)
     | DeleteTransform(TransformId)
     | DeleteEnrichment(EnrichmentId)
     | TriggerBackfill(SinkId)
-    | TriggerReindex(IndexId)
+    | TriggerReindex({ source: IndexId, target: IndexId })
     | SwapAlias({ pipeline: PipelineName, color: Color })
 
   // ---------------------------------------------------------------------------

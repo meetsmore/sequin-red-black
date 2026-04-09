@@ -488,8 +488,9 @@ module commands_test {
   }
 
   // ---------------------------------------------------------------------------
-  // Scenario 4: Change index mappings
-  // Pipeline exists, user adds a field to the mappings. Same red-black flow.
+  // Scenario 4: Change index mappings — uses reindex path (not backfill)
+  // Only index config changed, so documents are already correct. Reindex copies
+  // them to a new index with the new schema. Minutes instead of hours.
   // ---------------------------------------------------------------------------
 
   run test_e2e_update_mappings = {
@@ -510,12 +511,17 @@ module commands_test {
         val updated_config = { ...fixture_pipeline_config, index: updated_index }
         load_desired_config("jobs", updated_config)
       )
-      // Plan to verify effects
+      // Plan to verify effects — should use TriggerReindex, not TriggerBackfill
       .then(cmd_plan)
       .then(all {
         assert(current_plans.size() == 1),
-        // Should produce effects (it's an update, treated as full red-black)
+        // Should produce 5 effects (index, transform, enrichment, sink, reindex)
         assert(current_plans.forall(p => p.effects.length() == 5)),
+        // Last effect should be TriggerReindex, not TriggerBackfill
+        assert(current_plans.forall(p => match p.effects[4].effect {
+          | TriggerReindex(_) => true
+          | _ => false
+        })),
         desired_pipelines' = desired_pipelines,
         live_pipelines' = live_pipelines,
         aliases' = aliases,
@@ -534,6 +540,153 @@ module commands_test {
           assert(live_pipelines.get(("jobs", new_color)).index.config.mappings == "{ title: text, status: keyword, owner: keyword }"),
           // Old color still has original mappings
           assert(live_pipelines.get(("jobs", old_color)).index.config.mappings == "{ title: text, status: keyword }"),
+          // Reindex path: index starts as IndexReindexing (not Green)
+          assert(live_pipelines.get(("jobs", new_color)).index.status == IndexReindexing),
+          // Reindex path: sink is NOT backfilling (data comes from reindex, not Sequin)
+          assert(not(live_pipelines.get(("jobs", new_color)).sink.backfilling)),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scenario 4b: Full reindex flow — reindex completes, activate, drop old
+  // ---------------------------------------------------------------------------
+
+  run test_e2e_reindex_full_cycle = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_activate("jobs", color)
+      )
+      // Change only mappings
+      .then(
+        val updated_index = { ...fixture_index_config, mappings: "{ title: text, status: keyword, owner: keyword }" }
+        val updated_config = { ...fixture_pipeline_config, index: updated_index }
+        load_desired_config("jobs", updated_config)
+      )
+      .then(cmd_apply(false))
+      // Reindex completes
+      .then(
+        val old_color = aliases.get("jobs")
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val new_color = jobs_colors.exclude(Set(old_color)).fold(Red, (acc, c) => c)
+        reindex_completes("jobs", new_color)
+      )
+      .then(
+        val old_color = aliases.get("jobs")
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val new_color = jobs_colors.exclude(Set(old_color)).fold(Red, (acc, c) => c)
+        all {
+          // Index should now be green
+          assert(live_pipelines.get(("jobs", new_color)).index.status == IndexGreen),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Activate the new color
+      .then(
+        val old_color = aliases.get("jobs")
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val new_color = jobs_colors.exclude(Set(old_color)).fold(Red, (acc, c) => c)
+        cmd_activate("jobs", new_color)
+      )
+      .then(
+        val active_color = aliases.get("jobs")
+        all {
+          // Active color should have new mappings
+          assert(live_pipelines.get(("jobs", active_color)).index.config.mappings == "{ title: text, status: keyword, owner: keyword }"),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Drop old color
+      .then(
+        val active_color = aliases.get("jobs")
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val old_color = jobs_colors.exclude(Set(active_color)).fold(Red, (acc, c) => c)
+        cmd_drop("jobs", old_color)
+      )
+      .then(
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        all {
+          assert(jobs_colors.size() == 1),
+          assert(aliases.get("jobs").in(jobs_colors)),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scenario 4c: Change only batch_size — in-place update, no new color
+  // Operational fields don't affect document content, so the existing sink
+  // is updated directly. No backfill, no reindex, no new color.
+  // ---------------------------------------------------------------------------
+
+  run test_e2e_in_place_batch_size_update = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_activate("jobs", color)
+      )
+      // Change only batch_size (operational, no data impact)
+      .then(
+        val updated_sink = { ...fixture_sink_config, batch_size: 500 }
+        val updated_config = { ...fixture_pipeline_config, sink: updated_sink }
+        load_desired_config("jobs", updated_config)
+      )
+      // Plan should produce an UpdateSink effect
+      .then(cmd_plan)
+      .then(all {
+        assert(current_plans.size() == 1),
+        // Only 1 effect: UpdateSink (not 5 for full red-black)
+        assert(current_plans.forall(p => p.effects.length() == 1)),
+        // The effect should be UpdateSink
+        assert(current_plans.forall(p => match p.effects[0].effect {
+          | UpdateSink(_) => true
+          | _ => false
+        })),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+      })
+      // Apply: should update existing sink in place, no new color
+      .then(cmd_apply(false))
+      .then(
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val color = deployed_color_for("jobs", live_pipelines)
+        all {
+          // Still only one color (no new color created)
+          assert(jobs_colors.size() == 1),
+          // Sink config updated with new batch_size
+          assert(live_pipelines.get(("jobs", color)).sink.config.batch_size == 500),
+          // Sink is NOT backfilling
+          assert(not(live_pipelines.get(("jobs", color)).sink.backfilling)),
+          // Index unchanged
+          assert(live_pipelines.get(("jobs", color)).index.status == IndexGreen),
           desired_pipelines' = desired_pipelines,
           live_pipelines' = live_pipelines,
           aliases' = aliases,
@@ -602,15 +755,11 @@ module commands_test {
       )
       // Re-load the same config (no changes)
       .then(load_desired_config("jobs", fixture_pipeline_config))
-      // Plan: should produce a plan but with no effects (config matches live)
+      // Plan: field-level diff detects no changes, so no plans with effects
       .then(cmd_plan)
       .then(all {
-        // Plan exists but update has no effects since configs match
-        // Actually under current rules, Update always produces effects (full red-black)
-        // The plan_for_pipeline only checks ChangeKind, not field-level diffs
-        // So this will produce effects — this test documents that behavior
-        assert(current_plans.size() == 1),
-        assert(current_plans.forall(p => p.effects.length() == 5)),
+        // No plans generated (field-level diff sees configs match)
+        assert(current_plans.size() == 0),
         desired_pipelines' = desired_pipelines,
         live_pipelines' = live_pipelines,
         aliases' = aliases,
@@ -654,11 +803,11 @@ module commands_test {
       )
       .then(cmd_apply(false))
       .then(
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
         val clients_colors = ALL_COLORS.filter(c => ("clients", c).in(live_pipelines.keys()))
         all {
-          // Note: under current simplified rules, apply re-plans everything,
-          // so jobs also gets a new color (Update kind, since desired+live both exist)
-          // This documents the current behavior — future field-level diff will fix this
+          // Field-level diff: only clients changed, jobs stays at 1 color
+          assert(jobs_colors.size() == 1),
           assert(clients_colors.size() == 2),
           desired_pipelines' = desired_pipelines,
           live_pipelines' = live_pipelines,

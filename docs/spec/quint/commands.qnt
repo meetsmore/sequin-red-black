@@ -26,6 +26,20 @@ module commands {
   // Same as plan, then execute effects (create resources, trigger backfills)
   // ---------------------------------------------------------------------------
 
+  // Check if a plan creates a new colored variant (vs in-place update)
+  pure def plan_creates_new_color(p: Plan): bool =
+    p.effects.indices().exists(i => match p.effects[i].effect {
+      | CreateIndex(_) => true
+      | _ => false
+    })
+
+  // Check if a plan uses the reindex path (new color, but no backfill)
+  pure def plan_uses_reindex(p: Plan): bool =
+    p.effects.indices().exists(i => match p.effects[i].effect {
+      | TriggerReindex(_) => true
+      | _ => false
+    })
+
   action cmd_apply(skip_backfill: bool): bool = all {
     // Precondition: desired config exists
     desired_pipelines.keys().size() > 0,
@@ -35,15 +49,27 @@ module commands {
     val plans = generate_plans(desired_pipelines, live_pipelines, ALL_COLORS)
     // For simplicity in the spec, we model apply as creating all target pipelines at once
     val new_live = plans.fold(live_pipelines, (acc, p) =>
-      if (p.effects.length() > 0 and p.pipeline.in(desired_pipelines.keys())) {
+      if (p.effects.length() == 0 or not(p.pipeline.in(desired_pipelines.keys()))) acc
+      else if (not(plan_creates_new_color(p))) {
+        // In-place update: modify existing live pipeline, no new color
         val cfg = desired_pipelines.get(p.pipeline)
+        val existing_color = ALL_COLORS.filter(c => (p.pipeline, c).in(acc.keys())).fold(Red, (a, c) => c)
+        val existing = acc.get((p.pipeline, existing_color))
+        acc.put((p.pipeline, existing_color), {
+          ...existing,
+          sink: { ...existing.sink, config: cfg.sink },
+        })
+      } else {
+        // New color: reindex or backfill path
+        val cfg = desired_pipelines.get(p.pipeline)
+        val is_reindex = plan_uses_reindex(p)
         acc.put((p.pipeline, p.target_color), {
-          sink: { config: cfg.sink, lifecycle: SinkActive, backfilling: not(skip_backfill) },
-          index: { config: cfg.index, status: IndexGreen, doc_count: 0 },
+          sink: { config: cfg.sink, lifecycle: SinkActive, backfilling: if (is_reindex) false else not(skip_backfill) },
+          index: { config: cfg.index, status: if (is_reindex) IndexReindexing else IndexGreen, doc_count: 0 },
           transform: { config: cfg.transform, status: TransformActive },
           enrichment: { config: cfg.enrichment, status: EnrichmentActive },
         })
-      } else acc
+      }
     )
     all {
       live_pipelines' = new_live,
@@ -84,6 +110,8 @@ module commands {
     (pipeline, color).in(live_pipelines.keys()),
     // Precondition: the colored variant is not mid-backfill
     not(live_pipelines.get((pipeline, color)).sink.backfilling),
+    // Precondition: the index is not mid-reindex
+    live_pipelines.get((pipeline, color)).index.status != IndexReindexing,
     // Swap alias
     aliases' = aliases.put(pipeline, color),
     desired_pipelines' = desired_pipelines,
@@ -127,6 +155,23 @@ module commands {
   }
 
   // ---------------------------------------------------------------------------
+  // Model reindex completion (environment action)
+  // ---------------------------------------------------------------------------
+
+  action reindex_completes(pipeline: PipelineName, color: Color): bool = all {
+    (pipeline, color).in(live_pipelines.keys()),
+    live_pipelines.get((pipeline, color)).index.status == IndexReindexing,
+    live_pipelines' = live_pipelines.put((pipeline, color),
+      { ...live_pipelines.get((pipeline, color)),
+        index: { ...live_pipelines.get((pipeline, color)).index, status: IndexGreen }
+      }
+    ),
+    desired_pipelines' = desired_pipelines,
+    aliases' = aliases,
+    current_plans' = current_plans,
+  }
+
+  // ---------------------------------------------------------------------------
   // Non-deterministic step (for model checking)
   // ---------------------------------------------------------------------------
 
@@ -161,6 +206,12 @@ module commands {
       nondet p = desired_pipelines.keys().oneOf()
       nondet c = ALL_COLORS.oneOf()
       backfill_completes(p, c),
+    },
+    all {
+      desired_pipelines.keys().size() > 0,
+      nondet p = desired_pipelines.keys().oneOf()
+      nondet c = ALL_COLORS.oneOf()
+      reindex_completes(p, c),
     },
     // Model loading a config (needed to bootstrap the spec for model checking)
     nondet name = Set("jobs", "clients", "users").oneOf()
