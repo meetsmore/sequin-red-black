@@ -23,13 +23,13 @@ const online = program.command("online").description("Online operations (require
 
 function addConnectionOpts(cmd: Command): Command {
   return cmd
-    .option("--compiled <path>", "Path to compiled.json", process.env.SRB_COMPILED || "./compiled.json")
-    .option("--sequin-context <ctx>", "Sequin CLI context", process.env.SRB_SEQUIN_CONTEXT)
-    .option("--sequin-url <url>", "Sequin API URL", process.env.SRB_SEQUIN_URL || "http://localhost:7376")
-    .option("--sequin-token <token>", "Sequin API token", process.env.SRB_SEQUIN_TOKEN)
-    .option("--opensearch-url <url>", "OpenSearch URL", process.env.SRB_OPENSEARCH_URL || "http://localhost:9200")
-    .option("--opensearch-user <user>", "OpenSearch user", process.env.SRB_OPENSEARCH_USER)
-    .option("--opensearch-password <pass>", "OpenSearch password", process.env.SRB_OPENSEARCH_PASSWORD);
+    .option("--compiled <path>", "Path to compiled.json (env: SRB_COMPILED)", process.env.SRB_COMPILED || "./compiled.json")
+    .option("--sequin-context <ctx>", "Sequin CLI context (env: SRB_SEQUIN_CONTEXT)", process.env.SRB_SEQUIN_CONTEXT)
+    .option("--sequin-url <url>", "Sequin API URL (env: SRB_SEQUIN_URL)", process.env.SRB_SEQUIN_URL || "http://localhost:7376")
+    .option("--sequin-token <token>", "Sequin API token (env: SRB_SEQUIN_TOKEN)", process.env.SRB_SEQUIN_TOKEN)
+    .option("--opensearch-url <url>", "OpenSearch URL (env: SRB_OPENSEARCH_URL)", process.env.SRB_OPENSEARCH_URL || "http://localhost:9200")
+    .option("--opensearch-user <user>", "OpenSearch user (env: SRB_OPENSEARCH_USER)", process.env.SRB_OPENSEARCH_USER)
+    .option("--opensearch-password <pass>", "OpenSearch password (env: SRB_OPENSEARCH_PASSWORD)", process.env.SRB_OPENSEARCH_PASSWORD);
 }
 
 // Note: commander uses camelCase for multi-word option names
