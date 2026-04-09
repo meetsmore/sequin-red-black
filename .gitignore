@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Build artifacts
+srb/srb
+
+# OS
+.DS_Store
+
+# Compiled configs
+compiled.json
+
+# Temp files
+/tmp/
