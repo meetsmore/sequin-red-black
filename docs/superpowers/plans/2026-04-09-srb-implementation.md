@@ -9,9 +9,11 @@
 **Tech Stack:**
 - TypeScript + Bun (compiled to single self-contained binary via `bun build --compile`)
 - `commander` for CLI subcommands/flags
-- `zod` for runtime validation of Sequin/OpenSearch API responses
-- `js-yaml` for parsing `sink.yaml` / `transform.yaml` / `enrichment.yaml`
-- Bun's built-in `fetch` for HTTP
+- `zod` for runtime validation of OpenSearch + Sequin API responses
+- `js-yaml` for parsing `sink.yaml` / `transform.yaml` / `enrichment.yaml` and generating Sequin config YAML
+- Sequin CLI (`sequin config plan/apply/export`) for declarative resource management (sinks, transforms, enrichments)
+- Sequin REST API for imperative operations the CLI can't do (trigger backfill, query sink status)
+- Bun's built-in `fetch` for HTTP (OpenSearch + Sequin API)
 - Bun's built-in test runner (`bun test`) for unit + E2E tests
 - Docker Compose for E2E tests
 
@@ -34,8 +36,10 @@ srb/
     executor/
       executor.ts       # Walk PlannedEffects in dep order, call APIs
     sequin/
-      client.ts         # Sequin REST API client
+      cli.ts            # Sequin CLI wrapper (plan, apply, export via subprocess)
+      api.ts            # Thin Sequin REST API client (backfill, sink status)
       schemas.ts        # Zod schemas for Sequin API responses
+      yaml-gen.ts       # Generate Sequin config YAML from PipelineConfig + color
     opensearch/
       client.ts         # OpenSearch REST API client
       schemas.ts        # Zod schemas for OpenSearch API responses
@@ -54,14 +58,20 @@ srb/
     unit/
       effects.test.ts   # Pure planner unit tests (no network)
       plan.test.ts      # generatePlans() scenario tests
+    harness/
+      docker-compose.yml  # Test stack (shifted ports)
+      sequin-boot.yml     # Boot config (account, DB, token — no sinks)
+      init.sql            # Same schema as example/init.sql
+      constants.ts        # Ports, URLs, token
+      helpers.ts          # resetAll, deployPipeline, setAlias, triggerBackfill
+      sequin-api.ts       # Thin Sequin REST client for test queries
+      opensearch-api.ts   # OS REST client for test queries
+      run-srb.ts          # runSRB() subprocess wrapper
     e2e/
-      docker-compose.yml
-      sequin-boot.yml
-      init.sql
-      helpers.ts        # Stack lifecycle, RunSRB(), waitForHealth()
       apply.test.ts
       activate.test.ts
       drop.test.ts
+      backfill.test.ts
   package.json
   tsconfig.json
   bunfig.toml
@@ -332,37 +342,69 @@ export function generatePlans(
 
 ## Phase 3 — State discovery
 
-### 3.1 — Sequin client (`src/sequin/client.ts`)
+### 3.1 — Sequin CLI wrapper (`src/sequin/cli.ts`)
 
-Thin `fetch`-based client. API token via constructor (read from env `SRB_SEQUIN_TOKEN` or `--sequin-token` flag).
+`srb` delegates declarative Sequin resource management to the Sequin CLI (`sequin config plan/apply/export`). The CLI wrapper shells out to `sequin` as a subprocess.
 
 ```ts
-export class SequinClient {
+export interface SequinCLIOptions {
+  context?: string;  // --context flag, or SRB_SEQUIN_CONTEXT env
+}
+
+export class SequinCLI {
+  constructor(private opts: SequinCLIOptions) {}
+
+  // Run `sequin config plan <yamlPath>` — returns stdout (plan diff)
+  async plan(yamlPath: string): Promise<{ stdout: string; exitCode: number }>
+
+  // Run `sequin config apply <yamlPath> --auto-approve`
+  async apply(yamlPath: string): Promise<void>
+
+  // Run `sequin config export` — returns parsed YAML
+  async export(): Promise<SequinConfigYaml>
+}
+```
+
+### 3.2 — Sequin YAML generator (`src/sequin/yaml-gen.ts`)
+
+Generates Sequin config YAML from compiled `PipelineConfig` + target color. Output format matches `sequin-init.yml` (sinks + functions). This is the bridge between `srb`'s compiled config and `sequin config apply`.
+
+```ts
+// Generate a Sequin config YAML string for a set of colored pipeline plans.
+// Each plan stamps color into resource names: jobs_red sink, jobs_red-transform, etc.
+export function generateSequinYaml(
+  plans: Plan[],
+  desired: Map<string, PipelineConfig>,
+  existingConfig?: SequinConfigYaml,  // from sequin config export, to preserve unmanaged resources
+): string
+```
+
+### 3.3 — Sequin REST API client (`src/sequin/api.ts`)
+
+Thin `fetch`-based client for imperative operations the CLI can't do. API token via constructor (read from env `SRB_SEQUIN_TOKEN` or `--sequin-token` flag).
+
+```ts
+export class SequinAPI {
   constructor(private baseUrl: string, private token: string) {}
 
-  async listSinks(): Promise<SinkState[]>
-  async createSink(cfg: SinkConfig): Promise<SinkState>
-  async updateSink(id: string, cfg: SinkConfig): Promise<SinkState>
-  async deleteSink(id: string): Promise<void>
+  // Imperative operations
   async triggerBackfill(sinkId: string): Promise<void>
 
-  async listTransforms(): Promise<TransformState[]>
-  async createTransform(cfg: TransformConfig): Promise<TransformState>
-  async deleteTransform(id: string): Promise<void>
-
-  async listEnrichments(): Promise<EnrichmentState[]>
-  async createEnrichment(cfg: EnrichmentConfig): Promise<EnrichmentState>
-  async deleteEnrichment(id: string): Promise<void>
+  // Query operations (for state discovery)
+  async listSinks(): Promise<SinkInfo[]>
+  async getSink(id: string): Promise<SinkInfo>
 }
 ```
 
 Zod schemas in `src/sequin/schemas.ts` validate API responses at runtime — catches API contract drift immediately.
 
 **Tasks:**
-- [ ] Write `src/sequin/schemas.ts` — Zod schemas for each API response shape
-- [ ] Write `src/sequin/client.ts`
+- [ ] Write `src/sequin/cli.ts` — CLI subprocess wrapper
+- [ ] Write `src/sequin/yaml-gen.ts` — Sequin YAML generation from plans
+- [ ] Write `src/sequin/schemas.ts` — Zod schemas for Sequin API responses
+- [ ] Write `src/sequin/api.ts` — thin REST client for backfill + sink queries
 
-### 3.2 — OpenSearch client (`src/opensearch/client.ts`)
+### 3.4 — OpenSearch client (`src/opensearch/client.ts`)
 
 ```ts
 export class OpenSearchClient {
@@ -381,7 +423,7 @@ export class OpenSearchClient {
 - [ ] Write `src/opensearch/schemas.ts`
 - [ ] Write `src/opensearch/client.ts`
 
-### 3.3 — State discovery (`src/state/discover.ts`)
+### 3.5 — State discovery (`src/state/discover.ts`)
 
 ```ts
 export interface LiveState {
@@ -390,17 +432,18 @@ export interface LiveState {
 }
 
 export async function discover(
-  sequin: SequinClient,
+  sequinCli: SequinCLI,
+  sequinApi: SequinAPI,
   os: OpenSearchClient,
 ): Promise<LiveState>
 ```
 
 Logic:
-1. `sequin.listSinks()` → parse `<pipeline>_<color>` names → group by pipeline+color
-2. `sequin.listTransforms()` + `listEnrichments()` → same grouping
-3. `os.listIndices()` → same grouping
+1. `sequinCli.export()` → parse sinks/functions from exported YAML → parse `<pipeline>_<color>` names → group by pipeline+color
+2. `sequinApi.listSinks()` → get runtime state (lifecycle, backfilling) not available in YAML export
+3. `os.listIndices()` → same `<pipeline>_<color>` grouping
 4. `os` alias API → build `aliases` map
-5. Join all four per `(pipeline, color)` key
+5. Join all per `(pipeline, color)` key, merging config from CLI export with runtime state from API
 
 **Tasks:**
 - [ ] Write `src/state/discover.ts`
@@ -413,27 +456,34 @@ Logic:
 
 Walks `PlannedEffect[]` respecting `dependsOn` order (effects are already ordered 1..N in the spec — execute sequentially in order).
 
+The executor uses a two-phase approach:
+1. **Sequin resources** (sinks, transforms, enrichments): Generate colored YAML via `yaml-gen.ts`, apply via `sequin config apply`. The CLI handles create/update/delete declaratively.
+2. **OpenSearch resources** (indices, aliases, reindex): Direct REST API calls.
+3. **Imperative operations** (backfill): Sequin REST API.
+
 ```ts
 export interface ExecutorOptions {
-  sequin: SequinClient;
+  sequinCli: SequinCLI;
+  sequinApi: SequinAPI;
   openSearch: OpenSearchClient;
   skipBackfill: boolean;
   dryRun: boolean;
 }
 
-export async function execute(plans: Plan[], opts: ExecutorOptions): Promise<void>
+export async function execute(
+  plans: Plan[],
+  desired: Map<string, PipelineConfig>,
+  opts: ExecutorOptions
+): Promise<void>
 ```
 
-Effect dispatch:
-- `CreateIndex` → `os.createIndex(coloredIndexConfig(effect.index, targetColor))`
-- `CreateTransform` → `sequin.createTransform(coloredTransformConfig(...))`
-- `CreateEnrichment` → `sequin.createEnrichment(coloredEnrichmentConfig(...))`
-- `CreateSink` → `sequin.createSink(coloredSinkConfig(...))` (references transform/enrichment by colored ID)
-- `UpdateSink` → `sequin.updateSink(id, cfg)`
-- `DeleteSink/Transform/Enrichment/Index` → respective delete calls
-- `TriggerBackfill` → skip if `skipBackfill`, else `sequin.triggerBackfill(sinkId)`
-- `TriggerReindex` → `os.triggerReindex(source, target)`
-- `SwapAlias` → `os.swapAlias(pipeline, currentColor, targetColor)` — atomic add+remove
+Execution flow per plan:
+1. `CreateIndex` → `os.createIndex(coloredIndexConfig(effect.index, targetColor))`
+2. `CreateTransform` + `CreateEnrichment` + `CreateSink` / `UpdateSink` / `Delete*` → batched into a single `sequin config apply` call via generated YAML
+3. `TriggerBackfill` → skip if `skipBackfill`, else `sequinApi.triggerBackfill(sinkId)`
+4. `TriggerReindex` → `os.triggerReindex(source, target)`
+5. `SwapAlias` → `os.swapAlias(pipeline, currentColor, targetColor)` — atomic add+remove
+6. `DeleteIndex` → `os.deleteIndex(name)` (after Sequin resources removed)
 
 Helper `coloredXxxConfig(cfg, color)` stamps color into resource names, e.g. `jobs_red`, `jobs_red-transform`.
 
@@ -525,7 +575,7 @@ srb
     drop      <pipeline> <color> [connection flags]
 ```
 
-Persistent flags on `online`: `--compiled`, `--sequin-url`, `--sequin-token`, `--opensearch-url`, `--opensearch-user`, `--opensearch-password`. Env var fallbacks: `SRB_SEQUIN_URL`, `SRB_SEQUIN_TOKEN`, `SRB_OPENSEARCH_URL`, etc.
+Persistent flags on `online`: `--compiled`, `--sequin-context` (for CLI commands), `--sequin-url`, `--sequin-token` (for API calls), `--opensearch-url`, `--opensearch-user`, `--opensearch-password`. Env var fallbacks: `SRB_SEQUIN_CONTEXT`, `SRB_SEQUIN_URL`, `SRB_SEQUIN_TOKEN`, `SRB_OPENSEARCH_URL`, etc.
 
 **Tasks:**
 - [ ] Write `src/cli.ts` with full Commander tree
@@ -535,6 +585,10 @@ Persistent flags on `online`: `--compiled`, `--sequin-url`, `--sequin-token`, `-
 ---
 
 ## Phase 6 — Test harness
+
+> See `docs/superpowers/specs/2026-04-09-test-harness-design.md` for the full design spec.
+
+E2E tests run against real Sequin + OpenSearch in Docker. The harness uses a hybrid approach: Sequin CLI for declarative state setup, Sequin REST API for imperative operations (backfill, status queries), OpenSearch REST API for indices/aliases.
 
 ### 6.1 — Unit tests: effects + planner (`test/unit/`)
 
@@ -560,116 +614,131 @@ No network. Call `generatePlans()` directly with hand-crafted desired/live state
 - [ ] Write `test/unit/effects.test.ts`
 - [ ] Write `test/unit/plan.test.ts` with all scenarios
 
-### 6.2 — E2E test infrastructure (`test/e2e/`)
+### 6.2 — E2E test infrastructure (`test/harness/`)
 
-**`test/e2e/docker-compose.yml`** — same stack as `example/docker-compose.yml`, port-shifted to avoid conflicts:
+**Docker stack** — port-shifted to avoid conflicts with the example stack:
 
-```yaml
-name: srb-test
-services:
-  postgres:
-    image: postgres:16
-    environment: { POSTGRES_DB: sequin, POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres }
-    command: ["postgres", "-c", "wal_level=logical"]
-    ports: ["17377:5432"]
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres -d sequin"], interval: 5s, retries: 5 }
+| Service    | Image                              | Test Port | Internal Port |
+|------------|------------------------------------|-----------|---------------|
+| Postgres   | postgres:16                        | 17377     | 5432          |
+| Redis      | redis:7                            | 17378     | 6379          |
+| Sequin     | sequin/sequin:latest               | 17376     | 7376          |
+| OpenSearch | opensearchproject/opensearch:2.11.0| 19200     | 9200          |
 
-  redis:
-    image: redis:7
-    ports: ["17378:6379"]
+Postgres boots with same `init.sql` as `example/` (Job + Client tables, replication slot, seed data). Sequin boots with minimal `sequin-boot.yml` (account, DB connection, API token — no sinks/functions).
 
-  sequin:
-    image: sequin/sequin:latest
-    pull_policy: always
-    ports: ["17376:7376"]
-    environment:
-      PG_HOSTNAME: postgres
-      REDIS_URL: redis://redis:6379
-      CONFIG_FILE_PATH: /config/sequin-boot.yml
-      # ... (same credentials as example)
-    volumes:
-      - ./sequin-boot.yml:/config/sequin-boot.yml
-    depends_on: { redis: ..., postgres: { condition: service_healthy } }
-
-  opensearch:
-    image: opensearchproject/opensearch:2.11.0
-    environment: { discovery.type: single-node, DISABLE_SECURITY_PLUGIN: "true" }
-    ports: ["19200:9200"]
-    healthcheck: { test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"], interval: 10s }
-
-volumes: { pg_data, redis_data, opensearch_data }
-```
-
-**`test/e2e/helpers.ts`:**
-
-```ts
-// beforeAll / afterAll hooks for bun test
-
-export async function startStack(): Promise<void>   // docker compose up -d
-export async function stopStack(): Promise<void>    // docker compose down -v
-export async function waitForStack(): Promise<void> // poll Sequin /health + OS /_cluster/health
-export async function resetStack(): Promise<void>   // delete all test indices + sinks between tests
-
-export interface RunResult { stdout: string; stderr: string; exitCode: number }
-export async function runSRB(...args: string[]): Promise<RunResult>
-
-export const TEST_SEQUIN_URL = "http://localhost:17376";
-export const TEST_OS_URL     = "http://localhost:19200";
-export const COMPILED_PATH   = "/tmp/srb-test-compiled.json";
-```
+**Lifecycle:**
+- `beforeAll` — `docker compose up -d`, poll Sequin `/health` + OpenSearch `/_cluster/health` until ready, configure `sequin context` named `srb-test`
+- `afterEach` — `resetAll()` wipes Sequin config (empty `sequin config apply`) + deletes all OS test indices
+- `afterAll` — `docker compose down -v`
 
 **Tasks:**
-- [ ] Write `test/e2e/docker-compose.yml`
-- [ ] Write `test/e2e/sequin-boot.yml` (test-specific boot config, same shape as example)
-- [ ] Write `test/e2e/init.sql` (creates `source` DB + `public.Job` + `public.Client` tables + replication slot + publication)
-- [ ] Write `test/e2e/helpers.ts`
+- [ ] Write `test/harness/docker-compose.yml`
+- [ ] Write `test/harness/sequin-boot.yml` (test-specific boot config)
+- [ ] Write `test/harness/init.sql` (same schema as example)
+- [ ] Write `test/harness/constants.ts` — ports, URLs, token, compiled path
 
-### 6.3 — E2E apply tests (`test/e2e/apply.test.ts`)
+### 6.3 — Test helper API (`test/harness/`)
 
-Each test calls `resetStack()` to start clean.
+**Seed helpers** (`test/harness/helpers.ts`) — put the system into a known starting state:
 
-**`TestApply_FreshSetup`**
-1. `runSRB("offline", "compile", "--indexes", "../../example/indexes", "--out", COMPILED_PATH)`
-2. `runSRB("online", "plan", "--compiled", COMPILED_PATH, ...connFlags)` → assert exit code `2`
-3. `runSRB("online", "apply", "--compiled", COMPILED_PATH, "--auto-approve", ...connFlags)`
-4. Assert Sequin: sinks `jobs_red` and `clients_red` created
-5. Assert OpenSearch: indices `jobs_red` and `clients_red` created
-6. `runSRB("online", "plan", ...)` again → assert exit code `0`
+```ts
+// Wipe all state: sequin config apply with empty YAML + delete all OS test indices
+resetAll(): Promise<void>
 
-**`TestApply_NoChange`**
-1. Apply fresh setup
-2. Apply again → exit code `0`, no mutations to Sequin/OS
+// Deploy a fully provisioned colored pipeline:
+// 1. Generate colored Sequin YAML (e.g. jobs_red sink + jobs_red-transform function)
+// 2. sequin config apply --auto-approve --context=srb-test
+// 3. Create colored OS index with mappings
+// Does NOT set alias, does NOT trigger backfill (unless opts say so)
+deployPipeline(pipeline: string, color: string, config: PipelineConfig, opts?: {
+  backfill?: boolean;  // default false
+}): Promise<void>
 
-**`TestApply_BatchSizeChange`** (in-place update)
-1. Apply fresh setup
-2. Modify compiled.json: change jobs `batchSize` 1000 → 500
-3. `plan` → shows `UpdateSink` only
-4. `apply` → Sequin sink updated; no new index, no backfill
+// Set OS alias to point pipeline -> colored index
+setAlias(pipeline: string, color: string): Promise<void>
 
-**`TestApply_TransformChange`** (backfill path)
-1. Apply fresh setup
-2. Modify compiled.json: change jobs transform `functionBody`
-3. `plan` → shows CreateIndex, CreateTransform, CreateEnrichment, CreateSink, TriggerBackfill
-4. `apply --skip-backfill --auto-approve`
-5. Assert: `jobs_black` sink + index exist; `jobs_red` still exists
-6. `srb online activate jobs black` → OS alias `jobs` points to `jobs_black`
-7. `srb online drop jobs red` → `jobs_red` sink + index deleted
+// Sequin API: trigger backfill on a sink (puts it in backfilling state)
+triggerBackfill(pipeline: string, color: string): Promise<void>
+```
 
-**`TestActivate_Preconditions`**
-1. Apply fresh setup (jobs_red is created but alias not yet set)
-2. `activate jobs red` → succeeds (sets alias)
-3. `activate jobs red` again → error: already active
-4. Simulate backfilling: directly update Sequin sink to backfilling state
-5. `activate jobs red` → error: mid-backfill
+**Run helper** (`test/harness/run-srb.ts`):
 
-**`TestDrop_Active`**
-1. Apply fresh setup, `activate jobs red`
-2. `drop jobs red` → error: cannot drop active color
+```ts
+interface RunResult { stdout: string; stderr: string; exitCode: number }
+runSRB(...args: string[]): Promise<RunResult>
+```
 
-### 6.4 — Running tests
+**Query helpers** (`test/harness/sequin-api.ts`, `test/harness/opensearch-api.ts`):
+
+```ts
+// Sequin API queries
+getSinkState(pipeline: string, color: string): Promise<SinkInfo | null>
+listSinks(): Promise<SinkInfo[]>
+
+// OpenSearch queries
+getIndexState(pipeline: string, color: string): Promise<IndexInfo | null>
+listIndices(): Promise<IndexInfo[]>
+getAliasColor(pipeline: string): Promise<string | null>
+```
+
+Key design point: `deployPipeline` uses `sequin config apply` + OS REST directly — it does NOT call `srb`. This lets tests set up "a pipeline already exists at red" without depending on `srb` working correctly.
+
+**Tasks:**
+- [ ] Write `test/harness/helpers.ts` — resetAll, deployPipeline, setAlias, triggerBackfill
+- [ ] Write `test/harness/sequin-api.ts` — Sequin REST client for test queries
+- [ ] Write `test/harness/opensearch-api.ts` — OpenSearch REST client for test queries
+- [ ] Write `test/harness/run-srb.ts` — subprocess wrapper
+
+### 6.4 — E2E plan/apply tests (`test/e2e/apply.test.ts`)
+
+Each test calls `resetAll()` in setup.
+
+**Fresh setup** — compile → plan (exit 2) → apply → verify sinks + indices created → plan again (exit 0)
+
+**No change** — `deployPipeline("jobs", "red")` → compile matching config → plan → exit 0
+
+**Transform change (backfill path)** — `deployPipeline("jobs", "red")` → compile with modified transform → apply --skip-backfill → verify jobs_black created, jobs_red untouched → activate jobs black → drop jobs red
+
+**Batch size change (in-place)** — `deployPipeline("jobs", "red")` → compile with modified batch_size → apply → verify existing sink updated, no new color
+
+**Index mappings change (reindex path)** — `deployPipeline("jobs", "red")` → compile with modified mappings → apply → verify new color created, reindex triggered
+
+**Multi-pipeline** — compile jobs + clients → apply → verify both created independently
+
+**Tasks:**
+- [ ] Write `test/e2e/apply.test.ts` with all scenarios
+
+### 6.5 — E2E activate tests (`test/e2e/activate.test.ts`)
+
+**Activate succeeds** — `deployPipeline("jobs", "red")` → activate → alias points to jobs_red
+
+**Activate while backfilling → error** — `deployPipeline` + `triggerBackfill` → activate → non-zero exit, no alias
+
+**Activate already active → idempotent** — `deployPipeline` + `setAlias("jobs", "red")` → activate jobs red → exit 0, alias unchanged
+
+**Tasks:**
+- [ ] Write `test/e2e/activate.test.ts`
+
+### 6.6 — E2E drop tests (`test/e2e/drop.test.ts`)
+
+**Drop inactive color** — deploy red + black, `setAlias("jobs", "red")` → drop black → black deleted, red untouched
+
+**Drop active color → error** — deploy red, `setAlias("jobs", "red")` → drop red → error, nothing deleted
+
+**Tasks:**
+- [ ] Write `test/e2e/drop.test.ts`
+
+### 6.7 — E2E backfill tests (`test/e2e/backfill.test.ts`)
+
+**Manual backfill** — `deployPipeline("jobs", "red")` (no backfill) → `srb online backfill jobs red` → sink is backfilling
+
+**Backfill already running → error** — `deployPipeline` + `triggerBackfill` → `srb online backfill` → error
+
+**Tasks:**
+- [ ] Write `test/e2e/backfill.test.ts`
+
+### 6.8 — Makefile targets
 
 ```makefile
 build:
@@ -682,13 +751,16 @@ test-e2e:
 	bun test test/e2e/ --timeout 300000
 
 test: test-unit test-e2e
+
+test-stack-up:
+	docker compose -f test/harness/docker-compose.yml up -d
+
+test-stack-down:
+	docker compose -f test/harness/docker-compose.yml down -v
 ```
 
 **Tasks:**
-- [ ] Write `test/e2e/apply.test.ts` with all E2E scenarios
-- [ ] Write `test/e2e/activate.test.ts`
-- [ ] Write `test/e2e/drop.test.ts`
-- [ ] Write `Makefile` with `build`, `test-unit`, `test-e2e`, `test` targets
+- [ ] Write `Makefile` with all targets
 
 ---
 
@@ -727,8 +799,11 @@ test: test-unit test-e2e
 ### `--skip-backfill`
 Executor skips `TriggerBackfill` effects when set. The effect still appears in plan output. User runs `srb online backfill <pipeline> <color>` manually when ready.
 
+### Sequin CLI as dependency
+`srb` delegates declarative resource management (create/update/delete sinks, transforms, enrichments) to the Sequin CLI (`sequin config plan/apply`). This avoids reimplementing Sequin's diffing logic and keeps `srb` focused on orchestrating the red-black flow. The Sequin REST API is only used for imperative operations the CLI can't do (trigger backfill, query sink runtime status like backfilling state).
+
 ### E2E tests hit the real stack
-Apply tests bring up actual Postgres + Redis + Sequin + OpenSearch in `beforeAll`. No mocks. Catches API contract drift that unit tests miss. Unit tests remain pure with no network dependency.
+Tests bring up actual Postgres + Redis + Sequin + OpenSearch in Docker. No mocks. The test harness seeds state using the same tools `srb` uses (Sequin CLI + REST API + OpenSearch REST). Catches API contract drift that unit tests miss. Unit tests remain pure with no network dependency.
 
 ### State discovery is convention-based
-`srb` lists Sequin sinks and OpenSearch indices, parses `<pipeline>_<color>` names to reconstruct live state. No external state store. The tool is stateless.
+`srb` uses `sequin config export` + `sequin` API + OpenSearch API, parses `<pipeline>_<color>` names to reconstruct live state. No external state store. The tool is stateless.

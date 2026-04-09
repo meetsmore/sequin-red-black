@@ -59,6 +59,10 @@ quint run docs/spec/quint/commands.qnt --main=commands --invariant=witness_pipel
 quint test docs/spec/quint/commands_test.qnt --main=commands_test --match=test_name --verbosity=3
 ```
 
+## Spec-first rule
+
+Any implementation change that introduces new invariants, behaviors, or constraints NOT already documented in the Quint specs (`docs/spec/quint/`) MUST update the Quint specs first. The specs are the source of truth — implementation follows the spec, never the other way around.
+
 ## Quint language gotchas for this codebase
 
 - **Map membership**: `key.in(map.keys())` -- NOT `map.has(key)` (doesn't exist in 0.32.0)
