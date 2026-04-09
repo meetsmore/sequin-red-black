@@ -1,5 +1,6 @@
 import { discoverLiveState } from "../state/discover.js";
 import { generatePlans } from "../planner/plan.js";
+import { formatPlans } from "../planner/format.js";
 import { execute } from "../executor/executor.js";
 import { ALL_COLORS } from "../config/types.js";
 import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
@@ -16,12 +17,7 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
   }
 
   // Print plan
-  for (const plan of plans) {
-    console.log(`\nPipeline: ${plan.pipeline} → ${plan.targetColor}`);
-    for (const pe of plan.effects) {
-      console.log(`  ${pe.order}. ${pe.effect.kind}`);
-    }
-  }
+  console.log(formatPlans(plans, { desired, live: liveState.pipelines }));
 
   // Confirm unless auto-approve
   if (!opts.autoApprove) {
@@ -36,6 +32,7 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
     }
   }
 
+  console.log("");
   await execute(plans, desired, {
     sequinCli,
     sequinApi,

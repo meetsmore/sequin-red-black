@@ -39,7 +39,7 @@ export function sinkConfigChanged(desired: SinkConfig, live: SinkConfig): boolea
 }
 
 /** Deep comparison with sorted keys — order-independent JSON comparison */
-function sortedStringify(obj: unknown): string {
+export function sortedStringify(obj: unknown): string {
   return JSON.stringify(obj, (_, v) =>
     v && typeof v === "object" && !Array.isArray(v)
       ? Object.keys(v).sort().reduce((o: Record<string, unknown>, k) => { o[k] = (v as Record<string, unknown>)[k]; return o; }, {})

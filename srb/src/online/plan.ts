@@ -1,5 +1,6 @@
 import { discoverLiveState } from "../state/discover.js";
 import { generatePlans } from "../planner/plan.js";
+import { formatPlans } from "../planner/format.js";
 import { ALL_COLORS } from "../config/types.js";
 import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
 
@@ -17,13 +18,7 @@ export async function planCommand(opts: OnlineOptions & { output?: string }): Pr
   if (opts.output === "json") {
     console.log(JSON.stringify(plans, null, 2));
   } else {
-    // Human-readable output
-    for (const plan of plans) {
-      console.log(`\nPipeline: ${plan.pipeline} → ${plan.targetColor}`);
-      for (const pe of plan.effects) {
-        console.log(`  ${pe.order}. ${pe.effect.kind}`);
-      }
-    }
+    console.log(formatPlans(plans, { desired, live: liveState.pipelines }));
   }
 
   process.exit(2); // changes pending
