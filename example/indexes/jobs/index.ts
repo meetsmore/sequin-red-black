@@ -32,7 +32,8 @@ export default {
         properties: {
           name: { type: "text" },
         },
-      }
+      },
+      owner: { type: "text" },
     },
   },
 };
