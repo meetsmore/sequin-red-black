@@ -9,6 +9,7 @@ def transform(_action, record, _changes, metadata) do
     "isArchive" => record["isArchive"],
     "divisionId" => record["divisionId"],
     "createdAt" => record["createdAt"],
-    "updatedAt" => record["updatedAt"]
+    "updatedAt" => record["updatedAt"],
+    "owner" => record["owner"]
   }
 end
