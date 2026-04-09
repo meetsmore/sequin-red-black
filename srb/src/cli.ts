@@ -1,0 +1,66 @@
+#!/usr/bin/env bun
+import { Command } from "commander";
+import { compile } from "./offline/compile.js";
+import { planCommand } from "./online/plan.js";
+import { applyCommand } from "./online/apply.js";
+import { activateCommand } from "./online/activate.js";
+import { backfillCommand } from "./online/backfill.js";
+import { dropCommand } from "./online/drop.js";
+
+const program = new Command();
+program.name("srb").description("Red-Black Deployment Orchestrator").version("0.1.0");
+
+// offline group
+const offline = program.command("offline").description("Offline operations (no network)");
+offline.command("compile")
+  .description("Compile pipeline configs to JSON")
+  .option("--indexes <dir>", "Path to indexes directory", "./indexes")
+  .option("--out <path>", "Output path for compiled JSON", "./compiled.json")
+  .action(async (opts) => { await compile(opts.indexes, opts.out); });
+
+// online group with shared connection options
+const online = program.command("online").description("Online operations (requires Sequin + OpenSearch)");
+
+function addConnectionOpts(cmd: Command): Command {
+  return cmd
+    .option("--compiled <path>", "Path to compiled.json", process.env.SRB_COMPILED || "./compiled.json")
+    .option("--sequin-context <ctx>", "Sequin CLI context", process.env.SRB_SEQUIN_CONTEXT)
+    .option("--sequin-url <url>", "Sequin API URL", process.env.SRB_SEQUIN_URL || "http://localhost:7376")
+    .option("--sequin-token <token>", "Sequin API token", process.env.SRB_SEQUIN_TOKEN)
+    .option("--opensearch-url <url>", "OpenSearch URL", process.env.SRB_OPENSEARCH_URL || "http://localhost:9200")
+    .option("--opensearch-user <user>", "OpenSearch user", process.env.SRB_OPENSEARCH_USER)
+    .option("--opensearch-password <pass>", "OpenSearch password", process.env.SRB_OPENSEARCH_PASSWORD);
+}
+
+// Note: commander uses camelCase for multi-word option names
+function getOnlineOpts(opts: Record<string, string>) {
+  return {
+    compiled: opts.compiled,
+    sequinContext: opts.sequinContext,
+    sequinUrl: opts.sequinUrl,
+    sequinToken: opts.sequinToken,
+    opensearchUrl: opts.opensearchUrl,
+    opensearchUser: opts.opensearchUser,
+    opensearchPassword: opts.opensearchPassword,
+  };
+}
+
+addConnectionOpts(online.command("plan").description("Show planned changes"))
+  .option("--output <format>", "Output format (text|json)", "text")
+  .action(async (opts) => { await planCommand({ ...getOnlineOpts(opts), output: opts.output }); });
+
+addConnectionOpts(online.command("apply").description("Apply planned changes"))
+  .option("--skip-backfill", "Skip backfill triggers")
+  .option("--auto-approve", "Skip confirmation prompt")
+  .action(async (opts) => { await applyCommand({ ...getOnlineOpts(opts), skipBackfill: opts.skipBackfill, autoApprove: opts.autoApprove }); });
+
+addConnectionOpts(online.command("activate").description("Activate a colored variant").argument("<pipeline>", "Pipeline name").argument("<color>", "Color to activate"))
+  .action(async (pipeline: string, color: string, opts: Record<string, string>) => { await activateCommand(pipeline, color, getOnlineOpts(opts)); });
+
+addConnectionOpts(online.command("backfill").description("Trigger backfill").argument("<pipeline>", "Pipeline name").argument("<color>", "Color to backfill"))
+  .action(async (pipeline: string, color: string, opts: Record<string, string>) => { await backfillCommand(pipeline, color, getOnlineOpts(opts)); });
+
+addConnectionOpts(online.command("drop").description("Drop a colored variant").argument("<pipeline>", "Pipeline name").argument("<color>", "Color to drop"))
+  .action(async (pipeline: string, color: string, opts: Record<string, string>) => { await dropCommand(pipeline, color, getOnlineOpts(opts)); });
+
+program.parse();

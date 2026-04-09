@@ -1,0 +1,24 @@
+# Boot-only Sequin config for tests: account, users, API tokens, and database connection.
+# No sinks or functions — tests create those.
+
+account:
+  name: "SRB Example"
+
+users:
+  - account: "SRB Example"
+    email: "admin@example.com"
+    password: "sequinpassword!"
+
+api_tokens:
+  - name: "dev-token"
+    token: "srb-dev-token-secret"
+
+databases:
+  - name: "source-db"
+    username: "postgres"
+    password: "postgres"
+    hostname: "postgres"
+    database: "source"
+    port: 5432
+    slot_name: "sequin_slot"
+    publication_name: "sequin_pub"

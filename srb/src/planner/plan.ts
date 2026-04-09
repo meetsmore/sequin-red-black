@@ -1,0 +1,99 @@
+// Direct translation of docs/spec/quint/plan.qnt
+// All functions are pure — no I/O.
+
+import {
+  type Color,
+  type PipelineConfig,
+  type LivePipelineState,
+  type Plan,
+  type PipelineKey,
+  ALL_COLORS,
+  pipelineKey,
+  parseKey,
+} from "../config/types.js";
+import { effectsForCreate, effectsForUpdate, pipelineHasChanges } from "./effects.js";
+
+export type ChangeKind = "create" | "update" | "delete" | "no_change";
+
+// ---------------------------------------------------------------------------
+// Plan generation across all pipelines
+// ---------------------------------------------------------------------------
+
+/** Determine what kind of change a pipeline has */
+export function pipelineChangeKind(
+  pipeline: string,
+  desired: Map<string, PipelineConfig>,
+  live: Map<PipelineKey, LivePipelineState>,
+): ChangeKind {
+  const hasDesired = desired.has(pipeline);
+  const hasLive = ALL_COLORS.some((c) => live.has(pipelineKey(pipeline, c)));
+  if (hasDesired && !hasLive) return "create";
+  if (!hasDesired && hasLive) return "delete";
+  if (hasDesired && hasLive) return "update";
+  return "no_change";
+}
+
+/** Pick an available color for a pipeline — first color with no live entry */
+export function pickTargetColor(
+  pipeline: string,
+  live: Map<PipelineKey, LivePipelineState>,
+): Color {
+  for (const c of ALL_COLORS) {
+    if (!live.has(pipelineKey(pipeline, c))) {
+      return c;
+    }
+  }
+  // Fallback (should not happen with 7 colors and at most 2-3 active)
+  return "red";
+}
+
+/** Generate plans for all pipelines that have changes */
+export function generatePlans(
+  desired: Map<string, PipelineConfig>,
+  live: Map<PipelineKey, LivePipelineState>,
+  _allColors: Color[] = ALL_COLORS,
+): Plan[] {
+  // Get all pipeline names from desired + live
+  const pipelineNames = new Set<string>();
+  for (const name of desired.keys()) {
+    pipelineNames.add(name);
+  }
+  for (const key of live.keys()) {
+    const [name] = parseKey(key);
+    pipelineNames.add(name);
+  }
+
+  const plans: Plan[] = [];
+
+  for (const pipeline of pipelineNames) {
+    const kind = pipelineChangeKind(pipeline, desired, live);
+    const targetColor = pickTargetColor(pipeline, live);
+
+    let effects: Plan["effects"] = [];
+
+    if (kind === "create") {
+      effects = effectsForCreate(pipeline, desired.get(pipeline)!, targetColor);
+    } else if (kind === "update") {
+      // Find a live color to compare against
+      const liveColor = ALL_COLORS.find((c) => live.has(pipelineKey(pipeline, c)));
+      if (liveColor !== undefined) {
+        const liveState = live.get(pipelineKey(pipeline, liveColor))!;
+        const cfg = desired.get(pipeline)!;
+        if (pipelineHasChanges(cfg, liveState)) {
+          effects = effectsForUpdate(pipeline, cfg, liveState, targetColor);
+        }
+      }
+    }
+    // delete and no_change produce no effects
+
+    if (effects.length > 0) {
+      plans.push({
+        pipeline,
+        targetColor,
+        effects,
+      });
+    }
+  }
+
+  return plans;
+}
