@@ -1,0 +1,133 @@
+name: SRB Plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      indexes-dir:
+        description: "Path to indexes directory"
+        type: string
+        default: "./indexes"
+      srb-version:
+        description: "srb version to download (e.g. v0.1.0)"
+        type: string
+        default: "latest"
+      srb-repo:
+        description: "GitHub repo that hosts srb releases (owner/repo)"
+        type: string
+        required: true
+      sequin-url:
+        description: "Sequin API URL"
+        type: string
+        required: true
+      sequin-context:
+        description: "Sequin CLI context"
+        type: string
+      opensearch-url:
+        description: "OpenSearch URL"
+        type: string
+        required: true
+      opensearch-user:
+        description: "OpenSearch user"
+        type: string
+      apply:
+        description: "Run apply instead of plan"
+        type: boolean
+        default: false
+      auto-approve:
+        description: "Skip confirmation prompt (for apply)"
+        type: boolean
+        default: true
+
+  workflow_call:
+    inputs:
+      indexes-dir:
+        description: "Path to indexes directory"
+        type: string
+        default: "./indexes"
+      srb-version:
+        description: "srb version to download (e.g. v0.1.0)"
+        type: string
+        default: "latest"
+      srb-repo:
+        description: "GitHub repo that hosts srb releases (owner/repo)"
+        type: string
+        required: true
+      sequin-url:
+        description: "Sequin API URL"
+        type: string
+        required: true
+      sequin-context:
+        description: "Sequin CLI context"
+        type: string
+      opensearch-url:
+        description: "OpenSearch URL"
+        type: string
+        required: true
+      opensearch-user:
+        description: "OpenSearch user"
+        type: string
+      apply:
+        description: "Run apply instead of plan"
+        type: boolean
+        default: false
+      auto-approve:
+        description: "Skip confirmation prompt (for apply)"
+        type: boolean
+        default: true
+    secrets:
+      sequin-token:
+        required: true
+      opensearch-password:
+        required: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    env:
+      SRB_SEQUIN_URL: ${{ inputs.sequin-url }}
+      SRB_SEQUIN_CONTEXT: ${{ inputs.sequin-context }}
+      SRB_SEQUIN_TOKEN: ${{ secrets.sequin-token }}
+      SRB_OPENSEARCH_URL: ${{ inputs.opensearch-url }}
+      SRB_OPENSEARCH_USER: ${{ inputs.opensearch-user }}
+      SRB_OPENSEARCH_PASSWORD: ${{ secrets.opensearch-password }}
+      SRB_COMPILED: ./compiled.json
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Sequin CLI
+        run: curl -sf https://raw.githubusercontent.com/sequinstream/sequin/main/cli/installer.sh | sh
+
+      - name: Download srb
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)  ARTIFACT="srb-linux-amd64" ;;
+            aarch64) ARTIFACT="srb-linux-arm64" ;;
+            *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+
+          VERSION="${{ inputs.srb-version }}"
+          if [ "$VERSION" = "latest" ]; then
+            gh release download --repo "${{ inputs.srb-repo }}" --pattern "$ARTIFACT" --dir /usr/local/bin
+          else
+            gh release download "$VERSION" --repo "${{ inputs.srb-repo }}" --pattern "$ARTIFACT" --dir /usr/local/bin
+          fi
+          chmod +x /usr/local/bin/$ARTIFACT
+          mv /usr/local/bin/$ARTIFACT /usr/local/bin/srb
+
+      - name: Compile
+        run: srb offline compile --indexes ${{ inputs.indexes-dir }} --out compiled.json
+
+      - name: Plan or Apply
+        run: |
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            ARGS="online apply"
+            if [ "${{ inputs.auto-approve }}" = "true" ]; then
+              ARGS="$ARGS --auto-approve"
+            fi
+          else
+            ARGS="online plan"
+          fi
+          srb $ARGS
