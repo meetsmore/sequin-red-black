@@ -12,67 +12,84 @@ export const testOS = new TestOpenSearchClient(TEST_OS_URL);
 export const testSequin = new TestSequinClient(TEST_SEQUIN_URL, TEST_SEQUIN_TOKEN);
 
 /**
- * Wipe all state: apply minimal Sequin config (no sinks/functions) + delete all OS test indices.
+ * Wipe all state: delete all Sequin sinks via API + delete all OS test indices.
  */
 export async function resetAll(): Promise<void> {
-  // 1. Apply empty Sequin config (removes all sinks/functions)
-  // Write a minimal YAML with just the account/DB info, apply it
-  const minimalYaml = `
-account:
-  name: "SRB Example"
-
-users:
-  - account: "SRB Example"
-    email: "admin@example.com"
-    password: "sequinpassword!"
-
-api_tokens:
-  - name: "dev-token"
-    token: "srb-dev-token-secret"
-
-databases:
-  - name: "source-db"
-    username: "postgres"
-    password: "postgres"
-    hostname: "postgres"
-    database: "source"
-    port: 5432
-    slot_name: "sequin_slot"
-    publication_name: "sequin_pub"
-`;
-  const tmpPath = "/tmp/srb-test-reset-config.yml";
-  await Bun.write(tmpPath, minimalYaml);
-
-  const proc = Bun.spawn(
-    ["sequin", "config", "apply", "--auto-approve", `--context=${SEQUIN_CONTEXT}`, `--config=${tmpPath}`],
-    { stdout: "pipe", stderr: "pipe" },
-  );
-  await proc.exited;
-
-  // 2. Delete all test OpenSearch indices
+  await testSequin.deleteAllSinks();
   await testOS.deleteAllTestIndices();
 }
 
 /**
  * Deploy a fully provisioned colored pipeline:
- * 1. Generate colored Sequin YAML (sink + transform + enrichment)
- * 2. sequin config apply --auto-approve --context=srb-test
- * 3. Create colored OpenSearch index with mappings
+ * 1. Create colored OpenSearch index with mappings
+ * 2. Generate colored Sequin YAML (sink + transform + enrichment)
+ * 3. sequin config apply --auto-approve --context=srb-test
  */
 export async function deployPipeline(
   pipeline: string,
   color: string,
   config: PipelineConfig,
 ): Promise<void> {
-  // Create colored OS index
-  await testOS.createIndex(`${pipeline}_${color}`, {
+  const coloredName = `${pipeline}_${color}`;
+
+  // 1. Create colored OS index
+  await testOS.createIndex(coloredName, {
     mappings: config.index.mappings,
     settings: config.index.settings,
   });
 
-  // Generate and apply Sequin config for the sink
-  // In a real deployment this would generate full YAML; for tests we use the API directly
-  // For now, create the index only. Sink creation happens via srb apply in tests.
+  // 2. Generate and apply Sequin config
+  const yamlContent = generateDeployYaml(pipeline, color, config);
+  const tmpPath = `/tmp/srb-test-deploy-${pipeline}-${color}.yml`;
+  await Bun.write(tmpPath, yamlContent);
+
+  const proc = Bun.spawn(
+    ["sequin", "config", "apply", "--auto-approve", `--context=${SEQUIN_CONTEXT}`, tmpPath],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const stderr = await new Response(proc.stderr).text();
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new Error(`sequin config apply failed for ${coloredName}: ${stderr}`);
+  }
+}
+
+/**
+ * Generate Sequin YAML for a colored pipeline deployment.
+ */
+function generateDeployYaml(pipeline: string, color: string, config: PipelineConfig): string {
+  const coloredSink = `${pipeline}_${color}`;
+  const coloredTransform = `${pipeline}_${color}-transform`;
+  const coloredEnrichment = `${pipeline}_${color}-enrichment`;
+
+  return `sinks:
+  - name: ${coloredSink}
+    database: source-db
+    table: ${config.sink.sourceTable}
+    batch_size: ${config.sink.batchSize}
+    status: active
+    actions:
+      - insert
+      - update
+      - delete
+    destination:
+      type: elasticsearch
+      endpoint_url: http://opensearch:9200
+      index_name: ${coloredSink}
+      auth_type: basic
+      auth_value: admin:admin
+    transform: ${coloredTransform}
+    enrichment: ${coloredEnrichment}
+functions:
+  - name: ${coloredTransform}
+    type: transform
+    code: |
+      ${config.transform.functionBody.split("\n").join("\n      ")}
+  - name: ${coloredEnrichment}
+    type: enrichment
+    code: |
+      ${config.enrichment.source.split("\n").join("\n      ")}
+`;
 }
 
 /**

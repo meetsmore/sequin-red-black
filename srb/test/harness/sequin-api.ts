@@ -31,11 +31,25 @@ export class TestSequinClient {
     return sinks.find((s) => s.name === name) ?? null;
   }
 
+  async deleteSink(sinkId: string): Promise<void> {
+    const res = await this.fetch(`/api/sinks/${sinkId}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Sequin API DELETE /api/sinks/${sinkId}: ${res.status} ${await res.text()}`);
+    }
+  }
+
+  async deleteAllSinks(): Promise<void> {
+    const sinks = await this.listSinks();
+    for (const sink of sinks) {
+      await this.deleteSink(sink.id);
+    }
+  }
+
   async triggerBackfill(sinkId: string): Promise<void> {
-    const res = await this.fetch(`/api/sinks/${sinkId}/backfill`, { method: "POST" });
+    const res = await this.fetch(`/api/sinks/${sinkId}/backfills`, { method: "POST", body: "{}" });
     if (!res.ok) {
       throw new Error(
-        `Sequin API POST /api/sinks/${sinkId}/backfill: ${res.status} ${await res.text()}`,
+        `Sequin API POST /api/sinks/${sinkId}/backfills: ${res.status} ${await res.text()}`,
       );
     }
   }

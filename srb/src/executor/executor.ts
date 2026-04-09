@@ -83,11 +83,13 @@ function log(msg: string): void {
 async function executeOpenSearchEffect(
   effect: Effect,
   os: OpenSearchClient,
+  plan: Plan,
   dryRun: boolean,
 ): Promise<void> {
   switch (effect.kind) {
     case "CreateIndex": {
-      const name = effect.index.name;
+      // Stamp color into index name: "jobs" → "jobs_red"
+      const name = coloredIndexName(plan.pipeline, plan.targetColor);
       if (dryRun) {
         log(`[dry-run] Would create index: ${name}`);
         return;
@@ -163,6 +165,7 @@ async function executeSequinBatch(
 
 async function executeImperativeEffect(
   effect: Effect,
+  plan: Plan,
   opts: ExecutorOptions,
 ): Promise<void> {
   if (effect.kind !== "TriggerBackfill") {
@@ -179,8 +182,17 @@ async function executeImperativeEffect(
     return;
   }
 
-  log(`Triggering backfill for sink: ${effect.sinkId}`);
-  await opts.sequinApi.triggerBackfill(effect.sinkId);
+  // Look up the actual sink ID by colored name — the effect stores the base
+  // ID from desired config, but the Sequin API needs the UUID
+  const coloredName = coloredSinkName(plan.pipeline, plan.targetColor);
+  const sinks = await opts.sequinApi.listSinks();
+  const sink = sinks.find(s => s.name === coloredName);
+  if (!sink) {
+    throw new Error(`Cannot trigger backfill: sink "${coloredName}" not found in Sequin`);
+  }
+
+  log(`Triggering backfill for sink: ${coloredName} (${sink.id})`);
+  await opts.sequinApi.triggerBackfill(sink.id);
 }
 
 export async function execute(
@@ -202,7 +214,7 @@ export async function execute(
       switch (batch.category) {
         case "opensearch":
           for (const pe of batch.effects) {
-            await executeOpenSearchEffect(pe.effect, opts.openSearch, opts.dryRun);
+            await executeOpenSearchEffect(pe.effect, opts.openSearch, plan, opts.dryRun);
           }
           break;
         case "sequin_declarative":
@@ -210,7 +222,7 @@ export async function execute(
           break;
         case "imperative":
           for (const pe of batch.effects) {
-            await executeImperativeEffect(pe.effect, opts);
+            await executeImperativeEffect(pe.effect, plan, opts);
           }
           break;
       }

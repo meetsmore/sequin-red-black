@@ -49,6 +49,36 @@ export class OpenSearchClient {
     }
   }
 
+  async getIndexMappings(name: string): Promise<Record<string, unknown>> {
+    const res = await this.fetch(`/${name}/_mapping`);
+    if (!res.ok) return {};
+    const data = (await res.json()) as Record<string, { mappings?: Record<string, unknown> }>;
+    return data[name]?.mappings ?? {};
+  }
+
+  async getIndexSettings(name: string, desiredKeys?: string[]): Promise<Record<string, unknown>> {
+    const res = await this.fetch(`/${name}/_settings`);
+    if (!res.ok) return {};
+    const data = (await res.json()) as Record<string, { settings?: { index?: Record<string, unknown> } }>;
+    const settings = data[name]?.settings?.index ?? {};
+    // Only return settings that were in the desired config to avoid false diffs
+    // from auto-assigned defaults like number_of_shards
+    if (desiredKeys && desiredKeys.length > 0) {
+      const result: Record<string, unknown> = {};
+      for (const key of desiredKeys) {
+        if (key in (settings as Record<string, unknown>)) {
+          result[key] = (settings as Record<string, unknown>)[key];
+        }
+      }
+      return result;
+    }
+    // Fallback: return common user-settable fields
+    const idx = settings as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    if (idx.number_of_replicas !== undefined) result.number_of_replicas = idx.number_of_replicas;
+    return result;
+  }
+
   async deleteIndex(name: string): Promise<void> {
     const res = await this.fetch(`/${name}`, { method: "DELETE" });
     if (!res.ok && res.status !== 404) {

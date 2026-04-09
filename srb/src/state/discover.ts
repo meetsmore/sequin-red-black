@@ -12,7 +12,7 @@ import { pipelineKey } from "../config/types.js";
 import { colorFromString } from "../config/color.js";
 import type { SequinCLI } from "../sequin/cli.js";
 import type { SequinAPI } from "../sequin/api.js";
-import type { SinkInfo } from "../sequin/schemas.js";
+import { type SinkInfo, isBackfilling } from "../sequin/schemas.js";
 import type { OpenSearchClient } from "../opensearch/client.js";
 
 export interface LiveState {
@@ -96,16 +96,38 @@ export async function discoverLiveState(
       const sinkInfo = sinkInfoByName.get(sinkName);
 
       // Build SinkConfig from exported YAML
+      // Store color-agnostic values so comparison with desired config works.
+      // The desired config has base names (e.g. "jobs-transform"), while live
+      // has colored names (e.g. "jobs_red-transform"). We strip the color
+      // prefix to make comparison meaningful for content fields.
       const dest = s.destination as Record<string, unknown> | undefined;
+      const transformRef = (s.transform as string) ?? "";
+      const enrichmentRef = s.enrichment ? (s.enrichment as string) : "";
+
+      // Strip color prefix from function references for comparison
+      // "jobs_red-transform" → "jobs-transform"
+      const colorPrefix = `${pipeline}_${color}`;
+      const baseTransformId = transformRef.startsWith(colorPrefix)
+        ? pipeline + transformRef.slice(colorPrefix.length)
+        : transformRef;
+      const baseEnrichmentId = enrichmentRef.startsWith(colorPrefix)
+        ? pipeline + enrichmentRef.slice(colorPrefix.length)
+        : enrichmentRef;
+
+      // Extract source table from either `table` or `source.include_tables`
+      const source = s.source as Record<string, unknown> | undefined;
+      const includeTables = source?.include_tables as string[] | undefined;
+      const sourceTable = (s.table as string) ?? (includeTables?.[0] ?? "");
+
       const sinkConfig: SinkConfig = {
-        id: sinkInfo?.id ?? sinkName,
-        name: sinkName,
-        sourceTable: (s.table as string) ?? "",
+        id: sinkInfo?.id ?? sinkName, // Sequin UUID — needed for API calls
+        name: pipeline, // base name for comparison
+        sourceTable,
         destination: (dest?.endpoint_url as string) ?? "",
         filters: "",
         batchSize: (s.batch_size as number) ?? 1000,
-        transformId: (s.transform as string) ?? "",
-        enrichmentIds: s.enrichment ? [s.enrichment as string] : [],
+        transformId: baseTransformId, // base name for comparison
+        enrichmentIds: baseEnrichmentId ? [baseEnrichmentId] : [],
       };
 
       // Build IndexConfig from OpenSearch data
@@ -113,11 +135,19 @@ export async function discoverLiveState(
       const indexName = coloredIndexName ?? `${pipeline}_${color}`;
       const osIndex = osIndexByName.get(indexName);
 
+      // Fetch actual mappings/settings from OpenSearch for accurate comparison
+      const [actualMappings, actualSettings] = await Promise.all([
+        os.getIndexMappings(indexName),
+        os.getIndexSettings(indexName),
+      ]);
+
+      // Keep colored index name as ID (needed for delete/reindex),
+      // but content fields (mappings/settings) are compared directly
       const indexConfig: IndexConfig = {
-        id: indexName,
-        name: indexName,
-        mappings: {},
-        settings: {},
+        id: indexName,    // colored: "jobs_red" — needed for delete
+        name: pipeline,   // base: "jobs" — not compared
+        mappings: actualMappings,
+        settings: actualSettings,
         alias: pipeline,
       };
 
@@ -128,31 +158,31 @@ export async function discoverLiveState(
           ? indexHealth
           : ("not_found" as const);
 
-      // Build TransformConfig
+      // Keep colored function names as IDs (needed for delete)
       const transformName = `${pipeline}_${color}-transform`;
       const transformFn = functionsByName.get(transformName);
       const transformConfig: TransformConfig = {
-        id: transformName,
-        name: transformName,
-        functionBody: (transformFn?.code as string) ?? "",
-        inputSchema: "",
-        outputSchema: "",
+        id: transformName,           // colored: needed for delete
+        name: `${pipeline}-transform`, // base: for comparison
+        functionBody: ((transformFn?.code as string) ?? "").trim(),
+        inputSchema: "{}",
+        outputSchema: "{}",
       };
 
-      // Build EnrichmentConfig
+      // Keep colored function names as IDs (needed for delete)
       const enrichmentName = `${pipeline}_${color}-enrichment`;
       const enrichmentFn = functionsByName.get(enrichmentName);
       const enrichmentConfig: EnrichmentConfig = {
-        id: enrichmentName,
-        name: enrichmentName,
-        source: (enrichmentFn?.code as string) ?? "",
+        id: enrichmentName,             // colored: needed for delete
+        name: `${pipeline}-enrichment`, // base: for comparison
+        source: ((enrichmentFn?.code as string) ?? "").trim(),
         joinColumn: "",
         enrichmentColumns: "",
       };
 
       // Determine sink lifecycle from API data
       const lifecycle: SinkLifecycle = sinkInfo?.status ?? "active";
-      const backfilling = sinkInfo?.backfill?.active ?? false;
+      const backfilling = sinkInfo ? isBackfilling(sinkInfo) : false;
 
       const key = pipelineKey(pipeline, color);
       pipelines.set(key, {

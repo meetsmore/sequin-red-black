@@ -35,6 +35,6 @@ export class SequinAPI {
   }
 
   async triggerBackfill(sinkId: string): Promise<void> {
-    await this.fetch(`/api/sinks/${sinkId}/backfill`, { method: "POST" });
+    await this.fetch(`/api/sinks/${sinkId}/backfills`, { method: "POST", body: "{}" });
   }
 }

@@ -32,10 +32,13 @@ export class SequinCLI {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const stderr = await new Response(proc.stderr).text();
-    const exitCode = await proc.exited;
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
     if (exitCode !== 0) {
-      throw new Error(`sequin config apply failed (exit ${exitCode}): ${stderr}`);
+      throw new Error(`sequin config apply failed (exit ${exitCode}): ${stderr}\n${stdout}`);
     }
   }
 

@@ -38,11 +38,20 @@ export function sinkConfigChanged(desired: SinkConfig, live: SinkConfig): boolea
   return sinkDataChanged(desired, live) || sinkOperationalChanged(desired, live);
 }
 
+/** Deep comparison with sorted keys — order-independent JSON comparison */
+function sortedStringify(obj: unknown): string {
+  return JSON.stringify(obj, (_, v) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.keys(v).sort().reduce((o: Record<string, unknown>, k) => { o[k] = (v as Record<string, unknown>)[k]; return o; }, {})
+      : v
+  );
+}
+
 /** Compare two index configs — returns true if they differ */
 export function indexConfigChanged(desired: IndexConfig, live: IndexConfig): boolean {
   return (
-    JSON.stringify(desired.mappings) !== JSON.stringify(live.mappings) ||
-    JSON.stringify(desired.settings) !== JSON.stringify(live.settings)
+    sortedStringify(desired.mappings) !== sortedStringify(live.mappings) ||
+    sortedStringify(desired.settings) !== sortedStringify(live.settings)
   );
 }
 
