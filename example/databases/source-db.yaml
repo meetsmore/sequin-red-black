@@ -1,0 +1,10 @@
+name: source-db
+hostname: postgres
+port: 5432
+database: source
+username: postgres
+password: postgres
+slot:
+  name: sequin_slot
+publication:
+  name: sequin_pub

@@ -1,0 +1,78 @@
+name: srb-example
+
+services:
+  # --- Sequin's internal state database + source database (single Postgres, two databases) ---
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: sequin
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    command: ["postgres", "-c", "wal_level=logical"]
+    ports:
+      - "7377:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sequin"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 2s
+
+  # --- Redis (required by Sequin) ---
+  redis:
+    image: redis:7
+    ports:
+      - "7378:6379"
+    command: ["redis-server", "--port", "6379"]
+    volumes:
+      - redis_data:/data
+
+  # --- Sequin ---
+  sequin:
+    image: sequin/sequin:latest
+    pull_policy: always
+    ports:
+      - "7376:7376"
+    environment:
+      - PG_HOSTNAME=postgres
+      - PG_PORT=5432
+      - PG_DATABASE=sequin
+      - PG_USERNAME=postgres
+      - PG_PASSWORD=postgres
+      - PG_POOL_SIZE=20
+      - SECRET_KEY_BASE=wDPLYus0pvD6qJhKJICO4dauYPXfO/Yl782Zjtpew5qRBDp7CZvbWtQmY0eB13If
+      - VAULT_KEY=2Sig69bIpuSm2kv0VQfDekET2qy8qUZGI8v3/h3ASiY=
+      - REDIS_URL=redis://redis:6379
+      - CONFIG_FILE_PATH=/config/sequin-boot.yml
+    volumes:
+      - ./sequin-boot.yml:/config/sequin-boot.yml
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # --- OpenSearch ---
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg_data:
+  redis_data:
+  opensearch_data:

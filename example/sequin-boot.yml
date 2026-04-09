@@ -1,0 +1,25 @@
+# Boot-only Sequin config: account, users, API tokens, and database connection.
+# Loaded via CONFIG_FILE_PATH on startup. Does NOT include sinks or functions —
+# those are created by `srb online apply` after Sequin is running.
+
+account:
+  name: "SRB Example"
+
+users:
+  - account: "SRB Example"
+    email: "admin@example.com"
+    password: "sequinpassword!"
+
+api_tokens:
+  - name: "dev-token"
+    token: "srb-dev-token-secret"
+
+databases:
+  - name: "source-db"
+    username: "postgres"
+    password: "postgres"
+    hostname: "postgres"
+    database: "source"
+    port: 5432
+    slot_name: "sequin_slot"
+    publication_name: "sequin_pub"

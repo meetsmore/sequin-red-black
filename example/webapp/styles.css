@@ -1,0 +1,227 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f5f5f5;
+  color: #333;
+  line-height: 1.5;
+}
+
+.app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  font-size: 24px;
+  margin-bottom: 24px;
+  color: #111;
+}
+
+h2 {
+  font-size: 18px;
+  margin-bottom: 12px;
+  color: #222;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 24px;
+  border-bottom: 2px solid #ddd;
+}
+
+.tab {
+  padding: 8px 20px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: #666;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab:hover { color: #333; }
+.tab.active { color: #0066cc; border-bottom-color: #0066cc; }
+
+/* Search */
+.search-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.search-bar input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.search-bar select {
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+th, td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+}
+
+th {
+  background: #fafafa;
+  font-weight: 600;
+  color: #555;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f9f9ff; }
+
+/* Forms */
+.form-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.form-row input,
+.form-row select {
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.form-row input { flex: 1; min-width: 120px; }
+
+/* Buttons */
+button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.btn-primary { background: #0066cc; color: white; }
+.btn-primary:hover { background: #0052a3; }
+
+.btn-danger { background: #dc3545; color: white; }
+.btn-danger:hover { background: #b52d3a; }
+
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+.btn-ghost {
+  background: transparent;
+  color: #0066cc;
+  padding: 4px 8px;
+}
+.btn-ghost:hover { background: #eef4ff; }
+
+/* Inline edit */
+.inline-input {
+  padding: 4px 8px;
+  border: 1px solid #0066cc;
+  border-radius: 4px;
+  font-size: 14px;
+  width: 100%;
+}
+
+/* Score badge */
+.score {
+  display: inline-block;
+  background: #e8f4e8;
+  color: #2d7a2d;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Status badge */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge-open { background: #e8f4e8; color: #2d7a2d; }
+.badge-filled { background: #fff3cd; color: #856404; }
+.badge-enterprise { background: #cce5ff; color: #004085; }
+.badge-premium { background: #e2d5f1; color: #563d7c; }
+.badge-standard { background: #eee; color: #555; }
+
+.empty { color: #999; font-style: italic; padding: 24px; text-align: center; }
+
+.actions { display: flex; gap: 4px; }
+
+/* Migrations */
+.migration-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.migration-card {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.migration-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.migration-log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.log-entry {
+  font-size: 13px;
+  font-family: monospace;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+
+.log-ok { background: #e8f4e8; color: #2d7a2d; }
+.log-err { background: #fde8e8; color: #c53030; }

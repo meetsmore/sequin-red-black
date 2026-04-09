@@ -1,0 +1,21 @@
+name: clients_sink
+database: source-db
+table: public.Client
+batch_size: 1000
+status: active
+actions:
+- insert
+- update
+- delete
+timestamp_format: iso8601
+message_grouping: true
+load_shedding_policy: pause_on_full
+destination:
+  type: "elasticsearch"
+  endpoint_url: "http://opensearch:9200"
+  index_name: "clients"
+  auth_type: "basic"
+  auth_value: "admin:admin"
+  batch_size: 100
+transform: clients-transform
+enrichment: clients-enrichment

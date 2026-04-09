@@ -1,0 +1,121 @@
+account:
+  name: SRB Example
+users:
+  - account: SRB Example
+    email: admin@example.com
+    password: sequinpassword!
+api_tokens:
+  - name: dev-token
+    token: srb-dev-token-secret
+databases:
+  - name: source-db
+    hostname: postgres
+    port: 5432
+    database: source
+    username: postgres
+    password: postgres
+    slot:
+      name: sequin_slot
+    publication:
+      name: sequin_pub
+sinks:
+  - name: clients_sink
+    database: source-db
+    table: public.Client
+    batch_size: 1000
+    status: active
+    actions:
+      - insert
+      - update
+      - delete
+    timestamp_format: iso8601
+    message_grouping: true
+    load_shedding_policy: pause_on_full
+    destination:
+      type: elasticsearch
+      endpoint_url: http://opensearch:9200
+      index_name: clients
+      auth_type: basic
+      auth_value: admin:admin
+      batch_size: 100
+    transform: clients-transform
+    enrichment: clients-enrichment
+  - name: jobs_sink
+    database: source-db
+    table: public.Job
+    batch_size: 1000
+    status: active
+    actions:
+      - insert
+      - update
+      - delete
+    timestamp_format: iso8601
+    message_grouping: true
+    load_shedding_policy: pause_on_full
+    destination:
+      type: elasticsearch
+      endpoint_url: http://opensearch:9200
+      index_name: jobs
+      auth_type: basic
+      auth_value: admin:admin
+      batch_size: 100
+    transform: jobs-transform
+    enrichment: jobs-enrichment
+functions:
+  - name: clients-enrichment
+    type: enrichment
+    code: |-
+      SELECT
+        t.id
+      FROM "Client" t
+      WHERE t.id = ANY($$1);
+  - name: clients-transform
+    type: transform
+    code: |-
+      def transform(_action, record, _changes, metadata) do
+        %{
+          "id" => record["id"],
+          "name" => record["name"],
+          "companyName" => record["companyName"],
+          "phone" => record["phone"],
+          "email" => record["email"],
+          "isCompany" => record["isCompany"],
+          "isArchive" => record["isArchive"],
+          "divisionId" => record["divisionId"],
+          "createdAt" => record["createdAt"],
+          "updatedAt" => record["updatedAt"]
+        }
+      end
+  - name: jobs-enrichment
+    type: enrichment
+    code: |-
+      SELECT
+        j.id,
+        JSONB_BUILD_OBJECT('name', div.name) AS division
+      FROM "Job" j
+      LEFT JOIN "Division" div ON div.id = j."divisionId"
+      WHERE j.id = ANY($$1);
+  - name: jobs-transform
+    type: transform
+    code: |-
+      def transform(_action, record, _changes, metadata) do
+        enrich = metadata.enrichment || %{}
+
+        %{
+          "id" => record["id"],
+          "title" => record["title"],
+          "slug" => record["slug"],
+          "divisionId" => record["divisionId"],
+          "phaseId" => record["phaseId"],
+          "contactId" => record["contactId"],
+          "expectedOrderAmount" => record["expectedOrderAmount"],
+          "invoiceTotalAmount" => record["invoiceTotalAmount"],
+          "showInKanban" => record["showInKanban"],
+          "finishedAt" => record["finishedAt"],
+          "cancelledAt" => record["cancelledAt"],
+          "createdAt" => record["createdAt"],
+          "updatedAt" => record["updatedAt"],
+          "division" => enrich["division"],
+      #   "owner" => record["owner"]
+        }
+      end
