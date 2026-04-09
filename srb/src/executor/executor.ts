@@ -30,7 +30,7 @@ export function coloredEnrichmentName(pipeline: string, color: Color): string {
 }
 
 // Classify effects by execution target
-type EffectCategory = "opensearch" | "sequin_declarative" | "imperative";
+type EffectCategory = "opensearch" | "sequin_declarative" | "sequin_delete" | "imperative";
 
 function categorize(effect: Effect): EffectCategory {
   switch (effect.kind) {
@@ -43,10 +43,11 @@ function categorize(effect: Effect): EffectCategory {
     case "CreateTransform":
     case "CreateEnrichment":
     case "UpdateSink":
+      return "sequin_declarative";
     case "DeleteSink":
     case "DeleteTransform":
     case "DeleteEnrichment":
-      return "sequin_declarative";
+      return "sequin_delete";
     case "TriggerBackfill":
       return "imperative";
   }
@@ -163,6 +164,31 @@ async function executeSequinBatch(
   }
 }
 
+async function executeSequinDelete(
+  effect: Effect,
+  plan: Plan,
+  opts: ExecutorOptions,
+): Promise<void> {
+  if (effect.kind === "DeleteSink") {
+    // The effect ID is the Sequin UUID from live state discovery
+    if (opts.dryRun) {
+      log(`[dry-run] Would delete sink: ${effect.id}`);
+      return;
+    }
+    log(`Deleting sink: ${coloredSinkName(plan.pipeline, plan.targetColor)} (${effect.id})`);
+    await opts.sequinApi.deleteSink(effect.id);
+  } else if (effect.kind === "DeleteTransform" || effect.kind === "DeleteEnrichment") {
+    // Transforms and enrichments are "functions" in Sequin — they get cleaned
+    // up automatically when the sink referencing them is deleted, or on next
+    // sequin config apply. Log but no direct API call needed.
+    if (opts.dryRun) {
+      log(`[dry-run] Would delete function: ${effect.id}`);
+      return;
+    }
+    log(`Function ${effect.id} will be cleaned up by Sequin`);
+  }
+}
+
 async function executeImperativeEffect(
   effect: Effect,
   plan: Plan,
@@ -219,6 +245,11 @@ export async function execute(
           break;
         case "sequin_declarative":
           await executeSequinBatch(plan, batch.effects, desired, opts);
+          break;
+        case "sequin_delete":
+          for (const pe of batch.effects) {
+            await executeSequinDelete(pe.effect, plan, opts);
+          }
           break;
         case "imperative":
           for (const pe of batch.effects) {

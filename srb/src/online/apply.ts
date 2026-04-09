@@ -9,7 +9,7 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
   const desired = await loadCompiled(opts.compiled);
   const liveState = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
-  const plans = generatePlans(desired, liveState.pipelines, ALL_COLORS);
+  const plans = generatePlans(desired, liveState.pipelines, ALL_COLORS, liveState.aliases);
 
   if (plans.length === 0) {
     console.log("No changes. Infrastructure is up to date.");

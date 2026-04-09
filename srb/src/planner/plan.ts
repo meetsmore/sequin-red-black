@@ -52,6 +52,7 @@ export function generatePlans(
   desired: Map<string, PipelineConfig>,
   live: Map<PipelineKey, LivePipelineState>,
   _allColors: Color[] = ALL_COLORS,
+  aliases?: Map<string, Color>,
 ): Plan[] {
   // Get all pipeline names from desired + live
   const pipelineNames = new Set<string>();
@@ -74,8 +75,12 @@ export function generatePlans(
     if (kind === "create") {
       effects = effectsForCreate(pipeline, desired.get(pipeline)!, targetColor);
     } else if (kind === "update") {
-      // Find a live color to compare against
-      const liveColor = ALL_COLORS.find((c) => live.has(pipelineKey(pipeline, c)));
+      // Compare against the active color (alias target) if available,
+      // otherwise fall back to first live color found
+      const activeColor = aliases?.get(pipeline);
+      const liveColor = activeColor && live.has(pipelineKey(pipeline, activeColor))
+        ? activeColor
+        : ALL_COLORS.find((c) => live.has(pipelineKey(pipeline, c)));
       if (liveColor !== undefined) {
         const liveState = live.get(pipelineKey(pipeline, liveColor))!;
         const cfg = desired.get(pipeline)!;

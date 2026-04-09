@@ -34,6 +34,10 @@ export class SequinAPI {
     return SinkInfoSchema.parse(await res.json());
   }
 
+  async deleteSink(sinkId: string): Promise<void> {
+    await this.fetch(`/api/sinks/${sinkId}`, { method: "DELETE" });
+  }
+
   async triggerBackfill(sinkId: string): Promise<void> {
     await this.fetch(`/api/sinks/${sinkId}/backfills`, { method: "POST", body: "{}" });
   }
