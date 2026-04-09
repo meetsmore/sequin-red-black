@@ -1,3 +1,30 @@
+/**
+ * OpenSearch omits "type": "object" for fields that have "properties".
+ * Add it back to nested fields so desired vs live comparison doesn't
+ * produce false diffs. Does NOT add it to the root mappings object.
+ */
+function normalizeMappingTypes(mappings: Record<string, unknown>): void {
+  const props = mappings.properties as Record<string, unknown> | undefined;
+  if (!props || typeof props !== "object") return;
+  for (const field of Object.values(props)) {
+    normalizeFieldType(field);
+  }
+}
+
+function normalizeFieldType(field: unknown): void {
+  if (!field || typeof field !== "object" || Array.isArray(field)) return;
+  const rec = field as Record<string, unknown>;
+  if (rec.properties && typeof rec.properties === "object") {
+    if (!rec.type) {
+      rec.type = "object";
+    }
+    const props = rec.properties as Record<string, unknown>;
+    for (const val of Object.values(props)) {
+      normalizeFieldType(val);
+    }
+  }
+}
+
 /** Recursively coerce numeric strings to numbers in an object tree */
 function deepCoerceNumbers(obj: unknown): unknown {
   if (typeof obj === "string" && /^\d+$/.test(obj)) return Number(obj);
@@ -67,7 +94,11 @@ export class OpenSearchClient {
     const res = await this.fetch(`/${name}/_mapping`);
     if (!res.ok) return {};
     const data = (await res.json()) as Record<string, { mappings?: Record<string, unknown> }>;
-    return data[name]?.mappings ?? {};
+    const mappings = data[name]?.mappings ?? {};
+    // OpenSearch omits "type": "object" from fields with "properties" since
+    // it's the default. Add it back so comparison with desired config works.
+    normalizeMappingTypes(mappings);
+    return mappings;
   }
 
   /**
