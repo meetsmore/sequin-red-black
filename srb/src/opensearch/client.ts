@@ -81,14 +81,17 @@ export class OpenSearchClient {
     name: string,
     body: { mappings: Record<string, unknown>; settings: Record<string, unknown> },
   ): Promise<void> {
-    // Delete first if exists — makes apply idempotent after partial failures
-    await this.deleteIndex(name);
     const res = await this.fetch(`/${name}`, {
       method: "PUT",
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      throw new Error(`OpenSearch PUT /${name}: ${res.status} ${await res.text()}`);
+      const text = await res.text();
+      // If index already exists (e.g. from a partial failed apply), skip
+      if (res.status === 400 && text.includes("resource_already_exists_exception")) {
+        return;
+      }
+      throw new Error(`OpenSearch PUT /${name}: ${res.status} ${text}`);
     }
   }
 
