@@ -41,8 +41,8 @@ cd ..
 
 echo ""
 echo "=== Starting webapp ==="
-# Kill any previous webapp instance on port 3000
-lsof -ti :3000 | xargs kill -9 2>/dev/null || true
+# Kill any previous bun server on port 3000 (avoid killing browsers etc)
+lsof -ti :3000 -sTCP:LISTEN | xargs kill 2>/dev/null || true
 sleep 0.5
 
 cd example/webapp
