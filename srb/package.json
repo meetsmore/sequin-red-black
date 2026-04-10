@@ -2,6 +2,7 @@
   "name": "srb",
   "version": "0.1.0",
   "type": "module",
+  "bin": "./srb",
   "scripts": {
     "build": "bun build --compile --target=bun src/cli.ts --outfile srb",
     "test": "bun test",
