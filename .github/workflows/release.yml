@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
@@ -45,7 +48,7 @@ jobs:
           name: srb-linux-arm64
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version }}
+          tag_name: ${{ inputs.version || github.ref_name }}
           files: |
             srb-linux-amd64
             srb-linux-arm64
