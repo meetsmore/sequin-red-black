@@ -1,0 +1,5 @@
+{
+  "name": "sequin-red-black",
+  "private": true,
+  "workspaces": ["srb", "example/webapp"]
+}
