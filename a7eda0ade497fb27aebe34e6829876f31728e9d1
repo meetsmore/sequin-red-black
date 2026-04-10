@@ -1,0 +1,23 @@
+package.json
+  32cdb9b8a879ce0c 4-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "a7eda0ade497fb27aebe34e6829876f31728e9d1",
+  "prompts": {
+    "32cdb9b8a879ce0c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cf614b21-5c4f-4a32-a0fe-728fbb0c169b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Zachary Davison",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 1,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
