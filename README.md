@@ -296,6 +296,69 @@ make test-stack-down           # Clean up
 bun test
 ```
 
+## GitHub Actions
+
+This repo provides reusable workflows that any repo can call to run `srb` commands. All are manually triggered (`workflow_dispatch`) and callable from other repos (`workflow_call`).
+
+### Release
+
+`.github/workflows/release.yml` — compiles `srb` binaries for linux/amd64 and linux/arm64, publishes them as GitHub Release assets.
+
+```bash
+# Trigger via GitHub UI or CLI
+gh workflow run release.yml -f version=v0.1.0
+```
+
+### Reusable workflows
+
+| Workflow | Description | Extra inputs |
+|----------|-------------|--------------|
+| `plan.yml` | Compile + plan (or apply) | `apply` (bool), `auto-approve` (bool) |
+| `activate.yml` | Activate a colored variant | `pipeline`, `color` |
+| `drop.yml` | Drop a colored variant | `pipeline`, `color` |
+| `backfill.yml` | Trigger a backfill | `pipeline`, `color` |
+
+All four share these inputs:
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `srb-repo` | yes | | GitHub repo hosting srb releases (e.g. `myorg/sequin-red-black-v2`) |
+| `srb-version` | no | `latest` | Version of srb binary to download |
+| `indexes-dir` | no | `./indexes` | Path to pipeline config directory |
+| `sequin-url` | yes | | Sequin API URL |
+| `sequin-context` | no | | Sequin CLI context |
+| `opensearch-url` | yes | | OpenSearch URL |
+| `opensearch-user` | no | | OpenSearch user |
+
+And these secrets:
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `sequin-token` | yes | Sequin API token |
+| `opensearch-password` | no | OpenSearch password |
+
+### Consumer example
+
+In the consuming repo, create a workflow that calls the reusable one:
+
+```yaml
+name: SRB Plan
+on:
+  workflow_dispatch:
+
+jobs:
+  plan:
+    uses: myorg/sequin-red-black-v2/.github/workflows/plan.yml@v0.1.0
+    with:
+      srb-repo: myorg/sequin-red-black-v2
+      indexes-dir: ./indexes
+      sequin-url: https://sequin.example.com
+      opensearch-url: https://opensearch.example.com
+    secrets:
+      sequin-token: ${{ secrets.SEQUIN_TOKEN }}
+      opensearch-password: ${{ secrets.OPENSEARCH_PASSWORD }}
+```
+
 ## Naming conventions
 
 Resources are named with a color suffix:
