@@ -1,0 +1,2 @@
+# Don't publish to npm — we only use pubz for git tagging + GitHub releases
+skip-publish
