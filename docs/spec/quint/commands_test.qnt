@@ -109,6 +109,69 @@ module commands_test {
   }
 
   // ---------------------------------------------------------------------------
+  // Sync fixtures (address_to_jobs — webhook sink targeting jobs index)
+  // ---------------------------------------------------------------------------
+
+  pure val fixture_sync_sink_config: SinkConfig = {
+    id: Sid("address_to_jobs_sink"),
+    name: "address_to_jobs_sink",
+    source_table: "addresses",
+    destination: "opensearch/_update_by_query",
+    filters: "",
+    batch_size: 1,
+    transform_id: Tid("address_to_jobs_transform"),
+    enrichment_ids: Set(Eid("address_to_jobs_enrichment")),
+  }
+
+  pure val fixture_sync_transform_config: TransformConfig = {
+    id: Tid("address_to_jobs_transform"),
+    name: "address_to_jobs_transform",
+    function_body: "fn(row) => update_query(row)",
+    input_schema: "{ address: string }",
+    output_schema: "{ query: string }",
+  }
+
+  pure val fixture_sync_enrichment_config: EnrichmentConfig = {
+    id: Eid("address_to_jobs_enrichment"),
+    name: "address_to_jobs_enrichment",
+    source: "addresses",
+    join_column: "id",
+    enrichment_columns: "street",
+  }
+
+  pure val fixture_sync_config: SyncConfig = {
+    name: "address_to_jobs",
+    sink: fixture_sync_sink_config,
+    transform: fixture_sync_transform_config,
+    enrichment: fixture_sync_enrichment_config,
+  }
+
+  pure val fixture_live_sync_state: LiveSyncState = {
+    sink: { config: fixture_sync_sink_config, lifecycle: SinkActive, backfilling: false },
+    transform: { config: fixture_sync_transform_config, status: TransformActive },
+    enrichment: { config: fixture_sync_enrichment_config, status: EnrichmentActive },
+  }
+
+  // Pipeline config WITH a sync
+  pure val fixture_pipeline_with_sync: PipelineConfig = {
+    name: "jobs",
+    sink: fixture_sink_config,
+    index: fixture_index_config,
+    transform: fixture_transform_config,
+    enrichment: fixture_enrichment_config,
+    syncs: List(fixture_sync_config),
+  }
+
+  // Live state WITH a sync
+  pure val fixture_live_with_sync: LivePipelineState = {
+    sink: { config: fixture_sink_config, lifecycle: SinkActive, backfilling: false },
+    index: { config: fixture_index_config, status: IndexGreen, doc_count: 1000 },
+    transform: { config: fixture_transform_config, status: TransformActive },
+    enrichment: { config: fixture_enrichment_config, status: EnrichmentActive },
+    syncs: List(fixture_live_sync_state),
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers for extracting deployed color from live state
   // ---------------------------------------------------------------------------
 
@@ -177,6 +240,69 @@ module commands_test {
       | TriggerBackfill(_) => assert(true)
       | _ => assert(false)
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sync tests
+  // ---------------------------------------------------------------------------
+
+  // Test: sync change detected
+  run test_sync_has_changes_detects_difference = {
+    val modified_sync = { ...fixture_sync_config, sink: { ...fixture_sync_sink_config, filters: "status = active" } }
+    val modified_live = { ...fixture_live_sync_state, sink: { ...fixture_live_sync_state.sink, config: { ...fixture_sync_sink_config, filters: "" } } }
+    assert(sync_has_changes(modified_sync, modified_live))
+  }
+
+  // Test: sync no change
+  run test_sync_has_changes_no_change = {
+    assert(not(sync_has_changes(fixture_sync_config, fixture_live_sync_state)))
+  }
+
+  // Test: pipeline with sync detected as changed when sync added
+  run test_pipeline_has_changes_sync_added = {
+    // desired has 1 sync, live has 0 syncs
+    assert(pipeline_has_changes(fixture_pipeline_with_sync, fixture_live_state))
+  }
+
+  // Test: pipeline with sync detected as changed when sync config differs
+  run test_pipeline_has_changes_sync_config_changed = {
+    val modified_sync = { ...fixture_sync_config, sink: { ...fixture_sync_sink_config, filters: "new_filter" } }
+    val desired = { ...fixture_pipeline_with_sync, syncs: List(modified_sync) }
+    assert(pipeline_has_changes(desired, fixture_live_with_sync))
+  }
+
+  // Test: pipeline with sync has no changes when everything matches
+  run test_pipeline_has_changes_sync_no_change = {
+    assert(not(pipeline_has_changes(fixture_pipeline_with_sync, fixture_live_with_sync)))
+  }
+
+  // Test: effects_for_create with syncs includes 8 effects (5 primary + 3 sync)
+  run test_effects_for_create_with_sync_count = {
+    val effs = effects_for_create("jobs", fixture_pipeline_with_sync, Red)
+    // 5 primary (index, transform, enrichment, sink, backfill) + 3 sync (transform, enrichment, sink)
+    assert(effs.length() == 8)
+  }
+
+  // Test: sync sink depends on index (order 1) and its own transform/enrichment
+  run test_effects_for_create_with_sync_dependencies = {
+    val effs = effects_for_create("jobs", fixture_pipeline_with_sync, Red)
+    // Sync effects are at indices 5, 6, 7 (0-indexed)
+    // Sync sink (index 7) should depend on index creation (order 1)
+    val sync_sink = effs[7]
+    assert(sync_sink.depends_on.contains(1))
+  }
+
+  // Test: effects_for_delete_color with syncs includes 7 effects (3 sync + 4 primary)
+  run test_effects_for_delete_with_sync_count = {
+    val effs = effects_for_delete_color("jobs", fixture_live_with_sync, Red)
+    // 3 sync deletes (sink, transform, enrichment) + 4 primary deletes (sink, transform, enrichment, index)
+    assert(effs.length() == 7)
+  }
+
+  // Test: sync-only change does NOT trigger needs_backfill
+  run test_sync_only_change_no_backfill = {
+    // Same primary config, different sync count
+    assert(not(needs_backfill(fixture_pipeline_with_sync, fixture_live_with_sync)))
   }
 
   // Test: plan generation produces a plan for a new pipeline
