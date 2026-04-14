@@ -11,10 +11,6 @@ on:
         description: "srb version to download (e.g. v0.1.0)"
         type: string
         default: "latest"
-      srb-repo:
-        description: "GitHub repo that hosts srb releases (owner/repo)"
-        type: string
-        required: true
       sequin-url:
         description: "Sequin API URL"
         type: string
@@ -48,10 +44,6 @@ on:
         description: "srb version to download (e.g. v0.1.0)"
         type: string
         default: "latest"
-      srb-repo:
-        description: "GitHub repo that hosts srb releases (owner/repo)"
-        type: string
-        required: true
       sequin-url:
         description: "Sequin API URL"
         type: string
@@ -97,25 +89,10 @@ jobs:
       - name: Install Sequin CLI
         run: curl -sf https://raw.githubusercontent.com/sequinstream/sequin/main/cli/installer.sh | sh
 
-      - name: Download srb
+      - name: Install SRB
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ARCH=$(uname -m)
-          case "$ARCH" in
-            x86_64)  ARTIFACT="srb-linux-amd64" ;;
-            aarch64) ARTIFACT="srb-linux-arm64" ;;
-            *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
-          esac
-
-          VERSION="${{ inputs.srb-version }}"
-          if [ "$VERSION" = "latest" ]; then
-            gh release download --repo "${{ inputs.srb-repo }}" --pattern "$ARTIFACT" --dir /usr/local/bin
-          else
-            gh release download "$VERSION" --repo "${{ inputs.srb-repo }}" --pattern "$ARTIFACT" --dir /usr/local/bin
-          fi
-          chmod +x /usr/local/bin/$ARTIFACT
-          mv /usr/local/bin/$ARTIFACT /usr/local/bin/srb
+          SRB_VERSION: ${{ inputs.srb-version }}
+        run: curl -fsSL https://raw.githubusercontent.com/sequin-io/sequin-red-black/main/install.sh | bash
 
       - name: Compile
         run: srb offline compile --indexes ${{ inputs.indexes-dir }} --out compiled.json
