@@ -248,7 +248,8 @@ module commands {
       (p, aliases.get(p)).in(live_pipelines.keys())
     )
 
-  // 3. No partial resource groups — every live pipeline has all 4 resources with non-empty IDs
+  // 3. No partial resource groups — every live pipeline has all 4 resources with non-empty IDs,
+  //    and every sync within each pipeline has all 3 of its resources with non-empty IDs
   val no_partial_pipelines: bool =
     live_pipelines.keys().forall(k =>
       val lp = live_pipelines.get(k)
@@ -257,6 +258,11 @@ module commands {
         lp.index.config.id != Iid(""),
         lp.transform.config.id != Tid(""),
         lp.enrichment.config.id != Eid(""),
+        lp.syncs.indices().forall(i => and {
+          lp.syncs[i].sink.config.id != Sid(""),
+          lp.syncs[i].transform.config.id != Tid(""),
+          lp.syncs[i].enrichment.config.id != Eid(""),
+        }),
       }
     )
 
