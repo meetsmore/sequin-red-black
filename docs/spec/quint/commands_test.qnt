@@ -1145,4 +1145,107 @@ module commands_test {
         current_plans' = current_plans,
       })
   }
+
+  // ---------------------------------------------------------------------------
+  // Scenario: Pipeline with syncs — full lifecycle
+  // Deploy jobs pipeline with address_to_jobs sync, backfill, activate,
+  // then update (new color), backfill again, activate new, drop old.
+  // ---------------------------------------------------------------------------
+
+  run test_e2e_pipeline_with_syncs = {
+    init
+      // Load config with sync
+      .then(load_desired_config("jobs", fixture_pipeline_with_sync))
+      // Apply: creates primary + sync resources
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        all {
+          // One colored variant exists
+          assert(live_pipelines.keys().size() == 1),
+          // Primary sink is backfilling
+          assert(live_pipelines.get(("jobs", color)).sink.backfilling),
+          // Sync sink is NOT backfilling (syncs don't backfill)
+          assert(not(live_pipelines.get(("jobs", color)).syncs[0].sink.backfilling)),
+          // Sync sink is active
+          assert(live_pipelines.get(("jobs", color)).syncs[0].sink.lifecycle == SinkActive),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Backfill completes, activate
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_activate("jobs", color)
+      )
+      .then(
+        val color1 = aliases.get("jobs")
+        all {
+          assert("jobs".in(aliases.keys())),
+          // Still 1 sync in the live state
+          assert(live_pipelines.get(("jobs", color1)).syncs.length() == 1),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Now update the transform (triggers new color with fresh backfill)
+      .then(
+        val updated_config: PipelineConfig = {
+          ...fixture_pipeline_with_sync,
+          transform: { ...fixture_transform_config, function_body: "fn(row) => updated(row)" },
+        }
+        load_desired_config("jobs", updated_config)
+      )
+      .then(cmd_apply(false))
+      .then(
+        val color1 = aliases.get("jobs")
+        all {
+          // Now 2 colored variants exist (old + new)
+          assert(live_pipelines.keys().size() == 2),
+          // Old color still has its sync
+          assert(live_pipelines.get(("jobs", color1)).syncs.length() == 1),
+          // New color also has a sync
+          val color2 = ALL_COLORS.filter(c => c != color1 and ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+          assert(live_pipelines.get(("jobs", color2)).syncs.length() == 1),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+        }
+      )
+      // Complete backfill on new color, activate it, drop old
+      .then(
+        val color1 = aliases.get("jobs")
+        val color2 = ALL_COLORS.filter(c => c != color1 and ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+        backfill_completes("jobs", color2)
+      )
+      .then(
+        val color1 = aliases.get("jobs")
+        val color2 = ALL_COLORS.filter(c => c != color1 and ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+        cmd_activate("jobs", color2)
+      )
+      .then(
+        val old_color = ALL_COLORS.filter(c => c != aliases.get("jobs") and ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+        cmd_drop("jobs", old_color)
+      )
+      .then(all {
+        // Only 1 colored variant remains (the new one)
+        assert(live_pipelines.keys().size() == 1),
+        // That variant has the sync
+        val color = aliases.get("jobs")
+        assert(live_pipelines.get(("jobs", color)).syncs.length() == 1),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+      })
+  }
 }
