@@ -349,14 +349,15 @@ gh workflow run release.yml -f version=v0.1.0
 
 ### Reusable workflows
 
-| Workflow | Description | Extra inputs |
-|----------|-------------|--------------|
-| `plan.yml` | Compile + plan (or apply) | `apply` (bool), `auto-approve` (bool) |
-| `activate.yml` | Activate a colored variant | `pipeline`, `color` |
-| `drop.yml` | Drop a colored variant | `pipeline`, `color` |
-| `backfill.yml` | Trigger a backfill | `pipeline`, `color` |
+| Workflow                 | Description                          | Extra inputs                         |
+|--------------------------|--------------------------------------|--------------------------------------|
+| `plan.yml`               | Compile + plan (or apply)            | `apply` (bool), `auto-approve` (bool) |
+| `activate.yml`           | Activate a colored variant           | `pipeline`, `color`                  |
+| `drop.yml`               | Drop a colored variant               | `pipeline`, `color`                  |
+| `backfill.yml`           | Trigger a backfill                   | `pipeline`, `color`                  |
+| `opensearch-compare.yml` | Compare two OpenSearch indexes       | `index-a`, `index-b`, `sample`       |
 
-All four share these inputs:
+The first four share these inputs:
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
@@ -374,6 +375,8 @@ And these secrets:
 |--------|----------|-------------|
 | `sequin-token` | yes | Sequin API token |
 | `opensearch-password` | no | OpenSearch password |
+
+`opensearch-compare.yml` only needs `srb-repo`, `srb-version`, `opensearch-url`, `opensearch-user`, `index-a`, `index-b`, and optionally `sample`. It does not require Sequin inputs.
 
 ### Consumer example
 

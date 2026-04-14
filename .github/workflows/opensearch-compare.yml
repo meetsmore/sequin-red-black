@@ -1,0 +1,101 @@
+name: SRB OpenSearch Compare
+
+on:
+  workflow_dispatch:
+    inputs:
+      srb-version:
+        description: "srb version to download (e.g. v0.1.0)"
+        type: string
+        default: "latest"
+      srb-repo:
+        description: "GitHub repo that hosts srb releases (owner/repo)"
+        type: string
+        required: true
+      opensearch-url:
+        description: "OpenSearch URL"
+        type: string
+        required: true
+      opensearch-user:
+        description: "OpenSearch user"
+        type: string
+      index-a:
+        description: "First index name"
+        type: string
+        required: true
+      index-b:
+        description: "Second index name"
+        type: string
+        required: true
+      sample:
+        description: "Fraction of docs to sample (e.g. 0.01 = 1%). Leave empty to compare all."
+        type: string
+
+  workflow_call:
+    inputs:
+      srb-version:
+        description: "srb version to download (e.g. v0.1.0)"
+        type: string
+        default: "latest"
+      srb-repo:
+        description: "GitHub repo that hosts srb releases (owner/repo)"
+        type: string
+        required: true
+      opensearch-url:
+        description: "OpenSearch URL"
+        type: string
+        required: true
+      opensearch-user:
+        description: "OpenSearch user"
+        type: string
+      index-a:
+        description: "First index name"
+        type: string
+        required: true
+      index-b:
+        description: "Second index name"
+        type: string
+        required: true
+      sample:
+        description: "Fraction of docs to sample (e.g. 0.01 = 1%). Leave empty to compare all."
+        type: string
+    secrets:
+      opensearch-password:
+        required: false
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    env:
+      SRB_OPENSEARCH_URL: ${{ inputs.opensearch-url }}
+      SRB_OPENSEARCH_USER: ${{ inputs.opensearch-user }}
+      SRB_OPENSEARCH_PASSWORD: ${{ secrets.opensearch-password }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download srb
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64)  ARTIFACT="srb-linux-amd64" ;;
+            aarch64) ARTIFACT="srb-linux-arm64" ;;
+            *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+
+          VERSION="${{ inputs.srb-version }}"
+          if [ "$VERSION" = "latest" ]; then
+            gh release download --repo "${{ inputs.srb-repo }}" --pattern "$ARTIFACT" --dir /usr/local/bin
+          else
+            gh release download "$VERSION" --repo "${{ inputs.srb-repo }}" --pattern "$ARTIFACT" --dir /usr/local/bin
+          fi
+          chmod +x /usr/local/bin/$ARTIFACT
+          mv /usr/local/bin/$ARTIFACT /usr/local/bin/srb
+
+      - name: Compare indexes
+        run: |
+          ARGS="${{ inputs.index-a }} ${{ inputs.index-b }}"
+          if [ -n "${{ inputs.sample }}" ]; then
+            ARGS="$ARGS --sample ${{ inputs.sample }}"
+          fi
+          srb online opensearch compare $ARGS
