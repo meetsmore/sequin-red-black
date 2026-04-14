@@ -74,6 +74,7 @@ function fixturePipeline(overrides?: {
     index: fixtureIndex(overrides?.index),
     transform: fixtureTransform(overrides?.transform),
     enrichment: fixtureEnrichment(overrides?.enrichment),
+    webhooks: [],
   };
 }
 
@@ -88,6 +89,7 @@ function fixtureLiveState(overrides?: {
     index: { config: fixtureIndex(overrides?.index), status: "green", docCount: 100 },
     transform: { config: fixtureTransform(overrides?.transform), status: "active" },
     enrichment: { config: fixtureEnrichment(overrides?.enrichment), status: "active" },
+    webhooks: [],
   };
 }
 
@@ -125,6 +127,7 @@ function fixtureClientPipeline(): PipelineConfig {
       joinColumn: "divisionId",
       enrichmentColumns: "name",
     },
+    webhooks: [],
   };
 }
 

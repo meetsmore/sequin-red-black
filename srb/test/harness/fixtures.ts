@@ -40,6 +40,7 @@ end`,
     joinColumn: "",
     enrichmentColumns: "",
   },
+  webhooks: [],
 };
 
 export const clientsConfig: PipelineConfig = {
@@ -77,6 +78,7 @@ end`,
     joinColumn: "",
     enrichmentColumns: "",
   },
+  webhooks: [],
 };
 
 /**

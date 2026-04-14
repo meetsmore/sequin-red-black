@@ -1,7 +1,7 @@
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { readdir } from "fs/promises";
-import type { PipelineConfig } from "./types.js";
+import type { PipelineConfig, WebhookConfig } from "./types.js";
 
 interface RawSinkYaml {
   name: string;
@@ -28,6 +28,57 @@ interface RawFunctionYaml {
   name: string;
   type: string;
   code_file: string;
+}
+
+async function loadWebhooks(pipelineDir: string): Promise<WebhookConfig[]> {
+  const webhooksDir = path.join(pipelineDir, "webhooks");
+  try {
+    const entries = await readdir(webhooksDir, { withFileTypes: true });
+    const webhookDirs = entries.filter(e => e.isDirectory() && !e.name.startsWith("_"));
+    const webhooks = await Promise.all(webhookDirs.map(e => loadWebhook(e.name, webhooksDir)));
+    return webhooks;
+  } catch {
+    // No webhooks/ directory — pipeline has no webhooks
+    return [];
+  }
+}
+
+async function loadWebhook(name: string, webhooksDir: string): Promise<WebhookConfig> {
+  const dir = path.join(webhooksDir, name);
+
+  const sinkYaml = yaml.load(await Bun.file(path.join(dir, "sink.yaml")).text()) as RawSinkYaml;
+  const transformYaml = yaml.load(await Bun.file(path.join(dir, "transform.yaml")).text()) as RawFunctionYaml;
+  const transformBody = await Bun.file(path.join(dir, transformYaml.code_file)).text();
+  const enrichmentYaml = yaml.load(await Bun.file(path.join(dir, "enrichment.yaml")).text()) as RawFunctionYaml;
+  const enrichmentSql = await Bun.file(path.join(dir, enrichmentYaml.code_file)).text();
+
+  return {
+    name,
+    sink: {
+      id: name,
+      name: sinkYaml.name,
+      sourceTable: sinkYaml.table ?? "",
+      destination: sinkYaml.destination?.endpoint_url ?? "",
+      filters: "",
+      batchSize: sinkYaml.batch_size ?? 1,
+      transformId: transformYaml.name,
+      enrichmentIds: [enrichmentYaml.name],
+    },
+    transform: {
+      id: transformYaml.name,
+      name: transformYaml.name,
+      functionBody: transformBody.trim(),
+      inputSchema: "{}",
+      outputSchema: "{}",
+    },
+    enrichment: {
+      id: enrichmentYaml.name,
+      name: enrichmentYaml.name,
+      source: enrichmentSql.trim(),
+      joinColumn: "",
+      enrichmentColumns: "",
+    },
+  };
 }
 
 export async function loadPipeline(name: string, indexesDir: string): Promise<PipelineConfig> {
@@ -81,6 +132,7 @@ export async function loadPipeline(name: string, indexesDir: string): Promise<Pi
       joinColumn: "",
       enrichmentColumns: "",
     },
+    webhooks: await loadWebhooks(dir),
   };
 }
 

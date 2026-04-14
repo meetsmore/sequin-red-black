@@ -70,8 +70,8 @@ module effects {
       desired.enrichment_columns != live.enrichment_columns,
     }
 
-  // Compare a sync's config against its live state
-  pure def sync_has_changes(desired: SyncConfig, live: LiveSyncState): bool =
+  // Compare a webhook's config against its live state
+  pure def webhook_has_changes(desired: WebhookConfig, live: LiveWebhookState): bool =
     or {
       sink_config_changed(desired.sink, live.sink.config),
       transform_config_changed(desired.transform, live.transform.config),
@@ -85,9 +85,9 @@ module effects {
       index_config_changed(desired.index, live.index.config),
       transform_config_changed(desired.transform, live.transform.config),
       enrichment_config_changed(desired.enrichment, live.enrichment.config),
-      desired.syncs.length() != live.syncs.length(),
-      desired.syncs.indices().exists(i =>
-        i < live.syncs.length() and sync_has_changes(desired.syncs[i], live.syncs[i])
+      desired.webhooks.length() != live.webhooks.length(),
+      desired.webhooks.indices().exists(i =>
+        i < live.webhooks.length() and webhook_has_changes(desired.webhooks[i], live.webhooks[i])
       ),
     }
 
@@ -134,15 +134,15 @@ module effects {
       { effect: CreateSink(desired.sink), status: Pending, depends_on: Set(1, 2, 3), order: 4 },
       { effect: TriggerBackfill(desired.sink.id), status: Pending, depends_on: Set(4), order: 5 },
     )
-    val sync_effects = desired.syncs.foldl(List(), (acc, sync) =>
+    val webhook_effects = desired.webhooks.foldl(List(), (acc, wh) =>
       val base = 5 + acc.length()
       acc.concat(List(
-        { effect: CreateTransform(sync.transform), status: Pending, depends_on: Set(), order: base + 1 },
-        { effect: CreateEnrichment(sync.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
-        { effect: CreateSink(sync.sink), status: Pending, depends_on: Set(1, base + 1, base + 2), order: base + 3 },
+        { effect: CreateTransform(wh.transform), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: CreateEnrichment(wh.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
+        { effect: CreateSink(wh.sink), status: Pending, depends_on: Set(1, base + 1, base + 2), order: base + 3 },
       ))
     )
-    primary.concat(sync_effects)
+    primary.concat(webhook_effects)
 
   // Effects for deleting all colored variants of a pipeline
   pure def effects_for_delete_color(
@@ -150,23 +150,23 @@ module effects {
     live: LivePipelineState,
     color: Color
   ): List[PlannedEffect] =
-    // Delete sync sinks first (they depend on the index)
-    val sync_deletes = live.syncs.foldl(List(), (acc, sync) =>
+    // Delete webhook sinks first (they depend on the index)
+    val webhook_deletes = live.webhooks.foldl(List(), (acc, wh) =>
       val base = acc.length()
       acc.concat(List(
-        { effect: DeleteSink(sync.sink.config.id), status: Pending, depends_on: Set(), order: base + 1 },
-        { effect: DeleteTransform(sync.transform.config.id), status: Pending, depends_on: Set(base + 1), order: base + 2 },
-        { effect: DeleteEnrichment(sync.enrichment.config.id), status: Pending, depends_on: Set(base + 1), order: base + 3 },
+        { effect: DeleteSink(wh.sink.config.id), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: DeleteTransform(wh.transform.config.id), status: Pending, depends_on: Set(base + 1), order: base + 2 },
+        { effect: DeleteEnrichment(wh.enrichment.config.id), status: Pending, depends_on: Set(base + 1), order: base + 3 },
       ))
     )
-    val p_base = sync_deletes.length()
+    val p_base = webhook_deletes.length()
     val primary_deletes = List(
       { effect: DeleteSink(live.sink.config.id), status: Pending, depends_on: Set(), order: p_base + 1 },
       { effect: DeleteTransform(live.transform.config.id), status: Pending, depends_on: Set(p_base + 1), order: p_base + 2 },
       { effect: DeleteEnrichment(live.enrichment.config.id), status: Pending, depends_on: Set(p_base + 1), order: p_base + 3 },
       { effect: DeleteIndex(live.index.config.id), status: Pending, depends_on: Set(p_base + 1, p_base + 2, p_base + 3), order: p_base + 4 },
     )
-    sync_deletes.concat(primary_deletes)
+    webhook_deletes.concat(primary_deletes)
 
   // Effects for reindexing — only index config changed, documents are already correct.
   // Creates a new colored variant with a new index, then reindexes from the old index
@@ -184,15 +184,15 @@ module effects {
       { effect: CreateSink(desired.sink), status: Pending, depends_on: Set(1, 2, 3), order: 4 },
       { effect: TriggerReindex({ source: source_index, target: desired.index.id }), status: Pending, depends_on: Set(1, 4), order: 5 },
     )
-    val sync_effects = desired.syncs.foldl(List(), (acc, sync) =>
+    val webhook_effects = desired.webhooks.foldl(List(), (acc, wh) =>
       val base = 5 + acc.length()
       acc.concat(List(
-        { effect: CreateTransform(sync.transform), status: Pending, depends_on: Set(), order: base + 1 },
-        { effect: CreateEnrichment(sync.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
-        { effect: CreateSink(sync.sink), status: Pending, depends_on: Set(1, base + 1, base + 2), order: base + 3 },
+        { effect: CreateTransform(wh.transform), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: CreateEnrichment(wh.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
+        { effect: CreateSink(wh.sink), status: Pending, depends_on: Set(1, base + 1, base + 2), order: base + 3 },
       ))
     )
-    primary.concat(sync_effects)
+    primary.concat(webhook_effects)
 
   // Effects for in-place update — only operational fields changed (e.g. batch_size).
   // No new color, no backfill, no reindex. Just update the existing sink config.

@@ -42,6 +42,14 @@ export interface PipelineConfig {
   index: IndexConfig;
   transform: TransformConfig;
   enrichment: EnrichmentConfig;
+  webhooks: WebhookConfig[];
+}
+
+export interface WebhookConfig {
+  name: string;
+  sink: SinkConfig;
+  transform: TransformConfig;
+  enrichment: EnrichmentConfig;
 }
 
 // Live state
@@ -56,6 +64,13 @@ export interface EnrichmentState { config: EnrichmentConfig; status: "active" | 
 export interface LivePipelineState {
   sink: SinkState;
   index: IndexState;
+  transform: TransformState;
+  enrichment: EnrichmentState;
+  webhooks: LiveWebhookState[];
+}
+
+export interface LiveWebhookState {
+  sink: SinkState;
   transform: TransformState;
   enrichment: EnrichmentState;
 }

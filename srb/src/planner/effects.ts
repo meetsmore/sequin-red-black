@@ -10,6 +10,8 @@ import {
   type PipelineConfig,
   type LivePipelineState,
   type PlannedEffect,
+  type WebhookConfig,
+  type LiveWebhookState,
 } from "../config/types.js";
 
 // ---------------------------------------------------------------------------
@@ -76,13 +78,24 @@ export function enrichmentConfigChanged(
   );
 }
 
+/** Compare a webhook's config against its live state */
+export function webhookHasChanges(desired: WebhookConfig, live: LiveWebhookState): boolean {
+  return (
+    sinkConfigChanged(desired.sink, live.sink.config) ||
+    transformConfigChanged(desired.transform, live.transform.config) ||
+    enrichmentConfigChanged(desired.enrichment, live.enrichment.config)
+  );
+}
+
 /** Check if any resource in a pipeline has changed */
 export function pipelineHasChanges(desired: PipelineConfig, live: LivePipelineState): boolean {
   return (
     sinkConfigChanged(desired.sink, live.sink.config) ||
     indexConfigChanged(desired.index, live.index.config) ||
     transformConfigChanged(desired.transform, live.transform.config) ||
-    enrichmentConfigChanged(desired.enrichment, live.enrichment.config)
+    enrichmentConfigChanged(desired.enrichment, live.enrichment.config) ||
+    desired.webhooks.length !== live.webhooks.length ||
+    desired.webhooks.some((wh, i) => i < live.webhooks.length && webhookHasChanges(wh, live.webhooks[i]))
   );
 }
 
@@ -119,13 +132,23 @@ export function effectsForCreate(
   desired: PipelineConfig,
   _targetColor: Color,
 ): PlannedEffect[] {
-  return [
+  const primary: PlannedEffect[] = [
     { effect: { kind: "CreateIndex", index: desired.index }, status: "pending", dependsOn: [], order: 1 },
     { effect: { kind: "CreateTransform", transform: desired.transform }, status: "pending", dependsOn: [], order: 2 },
     { effect: { kind: "CreateEnrichment", enrichment: desired.enrichment }, status: "pending", dependsOn: [], order: 3 },
     { effect: { kind: "CreateSink", sink: desired.sink }, status: "pending", dependsOn: [1, 2, 3], order: 4 },
     { effect: { kind: "TriggerBackfill", sinkId: desired.sink.id }, status: "pending", dependsOn: [4], order: 5 },
   ];
+  const webhookEffects: PlannedEffect[] = [];
+  for (const wh of desired.webhooks) {
+    const base = 5 + webhookEffects.length;
+    webhookEffects.push(
+      { effect: { kind: "CreateTransform", transform: wh.transform }, status: "pending", dependsOn: [], order: base + 1 },
+      { effect: { kind: "CreateEnrichment", enrichment: wh.enrichment }, status: "pending", dependsOn: [], order: base + 2 },
+      { effect: { kind: "CreateSink", sink: wh.sink }, status: "pending", dependsOn: [1, base + 1, base + 2], order: base + 3 },
+    );
+  }
+  return [...primary, ...webhookEffects];
 }
 
 /** Effects for deleting all resources for a pipeline+color */
@@ -134,12 +157,23 @@ export function effectsForDeleteColor(
   live: LivePipelineState,
   _color: Color,
 ): PlannedEffect[] {
-  return [
-    { effect: { kind: "DeleteSink", id: live.sink.config.id }, status: "pending", dependsOn: [], order: 1 },
-    { effect: { kind: "DeleteTransform", id: live.transform.config.id }, status: "pending", dependsOn: [1], order: 2 },
-    { effect: { kind: "DeleteEnrichment", id: live.enrichment.config.id }, status: "pending", dependsOn: [1], order: 3 },
-    { effect: { kind: "DeleteIndex", id: live.index.config.id }, status: "pending", dependsOn: [1, 2, 3], order: 4 },
+  const webhookDeletes: PlannedEffect[] = [];
+  for (const wh of live.webhooks) {
+    const base = webhookDeletes.length;
+    webhookDeletes.push(
+      { effect: { kind: "DeleteSink", id: wh.sink.config.id }, status: "pending", dependsOn: [], order: base + 1 },
+      { effect: { kind: "DeleteTransform", id: wh.transform.config.id }, status: "pending", dependsOn: [base + 1], order: base + 2 },
+      { effect: { kind: "DeleteEnrichment", id: wh.enrichment.config.id }, status: "pending", dependsOn: [base + 1], order: base + 3 },
+    );
+  }
+  const pBase = webhookDeletes.length;
+  const primaryDeletes: PlannedEffect[] = [
+    { effect: { kind: "DeleteSink", id: live.sink.config.id }, status: "pending", dependsOn: [], order: pBase + 1 },
+    { effect: { kind: "DeleteTransform", id: live.transform.config.id }, status: "pending", dependsOn: [pBase + 1], order: pBase + 2 },
+    { effect: { kind: "DeleteEnrichment", id: live.enrichment.config.id }, status: "pending", dependsOn: [pBase + 1], order: pBase + 3 },
+    { effect: { kind: "DeleteIndex", id: live.index.config.id }, status: "pending", dependsOn: [pBase + 1, pBase + 2, pBase + 3], order: pBase + 4 },
   ];
+  return [...webhookDeletes, ...primaryDeletes];
 }
 
 /** Effects for reindexing — index config changed, documents are correct */
@@ -149,13 +183,23 @@ export function effectsForReindex(
   sourceIndexId: string,
   _targetColor: Color,
 ): PlannedEffect[] {
-  return [
+  const primary: PlannedEffect[] = [
     { effect: { kind: "CreateIndex", index: desired.index }, status: "pending", dependsOn: [], order: 1 },
     { effect: { kind: "CreateTransform", transform: desired.transform }, status: "pending", dependsOn: [], order: 2 },
     { effect: { kind: "CreateEnrichment", enrichment: desired.enrichment }, status: "pending", dependsOn: [], order: 3 },
     { effect: { kind: "CreateSink", sink: desired.sink }, status: "pending", dependsOn: [1, 2, 3], order: 4 },
     { effect: { kind: "TriggerReindex", source: sourceIndexId, target: desired.index.id }, status: "pending", dependsOn: [1, 4], order: 5 },
   ];
+  const webhookEffects: PlannedEffect[] = [];
+  for (const wh of desired.webhooks) {
+    const base = 5 + webhookEffects.length;
+    webhookEffects.push(
+      { effect: { kind: "CreateTransform", transform: wh.transform }, status: "pending", dependsOn: [], order: base + 1 },
+      { effect: { kind: "CreateEnrichment", enrichment: wh.enrichment }, status: "pending", dependsOn: [], order: base + 2 },
+      { effect: { kind: "CreateSink", sink: wh.sink }, status: "pending", dependsOn: [1, base + 1, base + 2], order: base + 3 },
+    );
+  }
+  return [...primary, ...webhookEffects];
 }
 
 /** Effects for in-place update — only operational fields changed */

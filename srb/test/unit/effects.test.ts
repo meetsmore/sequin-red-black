@@ -11,6 +11,8 @@ import {
   needsInPlaceUpdate,
   effectsForCreate,
   effectsForDeleteColor,
+  webhookHasChanges,
+  pipelineHasChanges,
 } from "../../src/planner/effects.js";
 import type {
   SinkConfig,
@@ -19,6 +21,8 @@ import type {
   EnrichmentConfig,
   PipelineConfig,
   LivePipelineState,
+  WebhookConfig,
+  LiveWebhookState,
 } from "../../src/config/types.js";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +88,7 @@ function fixturePipeline(overrides?: {
     index: fixtureIndex(overrides?.index),
     transform: fixtureTransform(overrides?.transform),
     enrichment: fixtureEnrichment(overrides?.enrichment),
+    webhooks: [],
   };
 }
 
@@ -98,6 +103,92 @@ function fixtureLiveState(overrides?: {
     index: { config: fixtureIndex(overrides?.index), status: "green", docCount: 100 },
     transform: { config: fixtureTransform(overrides?.transform), status: "active" },
     enrichment: { config: fixtureEnrichment(overrides?.enrichment), status: "active" },
+    webhooks: [],
+  };
+}
+
+function fixtureWebhookSink(overrides?: Partial<SinkConfig>): SinkConfig {
+  return {
+    id: "sink-addr-to-jobs-red",
+    name: "address_to_jobs_red",
+    sourceTable: "public.Address",
+    destination: "opensearch://localhost:9200/_update_by_query",
+    filters: "",
+    batchSize: 1,
+    transformId: "transform-addr-to-jobs-red",
+    enrichmentIds: ["enrichment-addr-to-jobs-red"],
+    ...overrides,
+  };
+}
+
+function fixtureWebhookTransform(overrides?: Partial<TransformConfig>): TransformConfig {
+  return {
+    id: "transform-addr-to-jobs-red",
+    name: "address_to_jobs_red-transform",
+    functionBody: 'fn(record) { return { query: record.address }; }',
+    inputSchema: "public.Address",
+    outputSchema: "jobs",
+    ...overrides,
+  };
+}
+
+function fixtureWebhookEnrichment(overrides?: Partial<EnrichmentConfig>): EnrichmentConfig {
+  return {
+    id: "enrichment-addr-to-jobs-red",
+    name: "address_to_jobs_red-enrichment",
+    source: "public.Address",
+    joinColumn: "id",
+    enrichmentColumns: "street",
+    ...overrides,
+  };
+}
+
+function fixtureWebhook(overrides?: {
+  sink?: Partial<SinkConfig>;
+  transform?: Partial<TransformConfig>;
+  enrichment?: Partial<EnrichmentConfig>;
+}): WebhookConfig {
+  return {
+    name: "address_to_jobs",
+    sink: fixtureWebhookSink(overrides?.sink),
+    transform: fixtureWebhookTransform(overrides?.transform),
+    enrichment: fixtureWebhookEnrichment(overrides?.enrichment),
+  };
+}
+
+function fixtureLiveWebhookState(overrides?: {
+  sink?: Partial<SinkConfig>;
+  transform?: Partial<TransformConfig>;
+  enrichment?: Partial<EnrichmentConfig>;
+}): LiveWebhookState {
+  return {
+    sink: { config: fixtureWebhookSink(overrides?.sink), lifecycle: "active", backfilling: false },
+    transform: { config: fixtureWebhookTransform(overrides?.transform), status: "active" },
+    enrichment: { config: fixtureWebhookEnrichment(overrides?.enrichment), status: "active" },
+  };
+}
+
+function fixturePipelineWithWebhook(overrides?: {
+  sink?: Partial<SinkConfig>;
+  index?: Partial<IndexConfig>;
+  transform?: Partial<TransformConfig>;
+  enrichment?: Partial<EnrichmentConfig>;
+}): PipelineConfig {
+  return {
+    ...fixturePipeline(overrides),
+    webhooks: [fixtureWebhook()],
+  };
+}
+
+function fixtureLiveStateWithWebhook(overrides?: {
+  sink?: Partial<SinkConfig>;
+  index?: Partial<IndexConfig>;
+  transform?: Partial<TransformConfig>;
+  enrichment?: Partial<EnrichmentConfig>;
+}): LivePipelineState {
+  return {
+    ...fixtureLiveState(overrides),
+    webhooks: [fixtureLiveWebhookState()],
   };
 }
 
@@ -458,5 +549,126 @@ describe("effectsForDeleteColor", () => {
     if (deleteIndex.kind === "DeleteIndex") {
       expect(deleteIndex.id).toBe("index-jobs-red");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// webhookHasChanges
+// ---------------------------------------------------------------------------
+
+describe("webhookHasChanges", () => {
+  test("detects sink change", () => {
+    const desired = fixtureWebhook({ sink: { filters: "status = active" } });
+    const live = fixtureLiveWebhookState();
+    expect(webhookHasChanges(desired, live)).toBe(true);
+  });
+
+  test("detects transform change", () => {
+    const desired = fixtureWebhook({ transform: { functionBody: "fn(r) { return r; }" } });
+    const live = fixtureLiveWebhookState();
+    expect(webhookHasChanges(desired, live)).toBe(true);
+  });
+
+  test("detects enrichment change", () => {
+    const desired = fixtureWebhook({ enrichment: { source: "public.Contact" } });
+    const live = fixtureLiveWebhookState();
+    expect(webhookHasChanges(desired, live)).toBe(true);
+  });
+
+  test("returns false when identical", () => {
+    const desired = fixtureWebhook();
+    const live = fixtureLiveWebhookState();
+    expect(webhookHasChanges(desired, live)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pipelineHasChanges — webhooks
+// ---------------------------------------------------------------------------
+
+describe("pipelineHasChanges — webhooks", () => {
+  test("detects webhook added", () => {
+    const desired = fixturePipelineWithWebhook();
+    const live = fixtureLiveState(); // no webhooks
+    expect(pipelineHasChanges(desired, live)).toBe(true);
+  });
+
+  test("detects webhook removed", () => {
+    const desired = fixturePipeline(); // no webhooks
+    const live = fixtureLiveStateWithWebhook();
+    expect(pipelineHasChanges(desired, live)).toBe(true);
+  });
+
+  test("detects webhook config changed", () => {
+    const desired: PipelineConfig = {
+      ...fixturePipelineWithWebhook(),
+      webhooks: [fixtureWebhook({ sink: { filters: "new_filter" } })],
+    };
+    const live = fixtureLiveStateWithWebhook();
+    expect(pipelineHasChanges(desired, live)).toBe(true);
+  });
+
+  test("no change when webhooks match", () => {
+    const desired = fixturePipelineWithWebhook();
+    const live = fixtureLiveStateWithWebhook();
+    expect(pipelineHasChanges(desired, live)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectsForCreate — with webhooks
+// ---------------------------------------------------------------------------
+
+describe("effectsForCreate — with webhooks", () => {
+  test("produces 8 effects (5 primary + 3 webhook)", () => {
+    const pipeline = fixturePipelineWithWebhook();
+    const effects = effectsForCreate("jobs", pipeline, "red");
+    expect(effects).toHaveLength(8);
+  });
+
+  test("webhook effects follow primary effects", () => {
+    const pipeline = fixturePipelineWithWebhook();
+    const effects = effectsForCreate("jobs", pipeline, "red");
+    expect(effects[5].effect.kind).toBe("CreateTransform");
+    expect(effects[6].effect.kind).toBe("CreateEnrichment");
+    expect(effects[7].effect.kind).toBe("CreateSink");
+  });
+
+  test("webhook sink depends on index creation", () => {
+    const pipeline = fixturePipelineWithWebhook();
+    const effects = effectsForCreate("jobs", pipeline, "red");
+    expect(effects[7].dependsOn).toContain(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// effectsForDeleteColor — with webhooks
+// ---------------------------------------------------------------------------
+
+describe("effectsForDeleteColor — with webhooks", () => {
+  test("produces 7 effects (3 webhook + 4 primary)", () => {
+    const live = fixtureLiveStateWithWebhook();
+    const effects = effectsForDeleteColor("jobs", live, "red");
+    expect(effects).toHaveLength(7);
+  });
+
+  test("webhook deletes come before primary deletes", () => {
+    const live = fixtureLiveStateWithWebhook();
+    const effects = effectsForDeleteColor("jobs", live, "red");
+    expect(effects[0].effect.kind).toBe("DeleteSink");
+    expect(effects[3].effect.kind).toBe("DeleteSink");
+    expect(effects[6].effect.kind).toBe("DeleteIndex");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// needsBackfill — webhook changes
+// ---------------------------------------------------------------------------
+
+describe("needsBackfill — webhook changes", () => {
+  test("webhook-only change does NOT trigger backfill", () => {
+    const desired = fixturePipelineWithWebhook();
+    const live = fixtureLiveStateWithWebhook();
+    expect(needsBackfill(desired, live)).toBe(false);
   });
 });

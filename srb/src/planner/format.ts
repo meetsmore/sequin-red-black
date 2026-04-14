@@ -287,6 +287,18 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
       lines.push(formatNewResource("enrichment", desired.enrichment.name, [
         ["source", desired.enrichment.source],
       ], "    "));
+      for (const wh of desired.webhooks) {
+        lines.push(formatNewResource(`webhook sink (${wh.name})`, wh.name, [
+          ["sourceTable", wh.sink.sourceTable],
+          ["destination", wh.sink.destination],
+        ], "    "));
+        lines.push(formatNewResource(`webhook transform (${wh.name})`, wh.transform.name, [
+          ["functionBody", wh.transform.functionBody],
+        ], "    "));
+        lines.push(formatNewResource(`webhook enrichment (${wh.name})`, wh.enrichment.name, [
+          ["source", wh.enrichment.source],
+        ], "    "));
+      }
     } else if (kind === "update" && desired && live) {
       const indent = "    ";
       const resourceDiffs: ResourceDiff[] = [];

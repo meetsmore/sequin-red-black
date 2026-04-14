@@ -2,6 +2,7 @@ import type {
   Color,
   PipelineKey,
   LivePipelineState,
+  LiveWebhookState,
   PipelineConfig,
   SinkConfig,
   IndexConfig,
@@ -204,7 +205,83 @@ export async function discoverLiveState(
           config: enrichmentConfig,
           status: enrichmentFn ? "active" : "inactive",
         },
+        webhooks: [],
       });
+    }
+  }
+
+  // Second pass: detect webhook sinks and attach them to their parent pipeline
+  if (desired && Array.isArray(exportedConfig.sinks)) {
+    for (const sinkEntry of exportedConfig.sinks) {
+      const s = sinkEntry as Record<string, unknown>;
+      const sinkName = s.name as string;
+      if (!sinkName) continue;
+
+      const parsed = parseColoredName(sinkName);
+      if (!parsed) continue;
+
+      // Check if this is a known webhook name from desired config
+      for (const [pipelineName, pipelineCfg] of desired) {
+        for (const whCfg of pipelineCfg.webhooks) {
+          if (parsed.pipeline !== whCfg.name) continue;
+
+          const parentKey = pipelineKey(pipelineName, parsed.color);
+          const parentState = pipelines.get(parentKey);
+          if (!parentState) continue;
+
+          const sinkInfo = sinkInfoByName.get(sinkName);
+          const colorPrefix = `${whCfg.name}_${parsed.color}`;
+          const transformRef = (s.transform as string) ?? "";
+          const enrichmentRef = s.enrichment ? (s.enrichment as string) : "";
+
+          const baseTransformId = transformRef.startsWith(colorPrefix)
+            ? whCfg.name + transformRef.slice(colorPrefix.length)
+            : transformRef;
+          const baseEnrichmentId = enrichmentRef.startsWith(colorPrefix)
+            ? whCfg.name + enrichmentRef.slice(colorPrefix.length)
+            : enrichmentRef;
+
+          const whSinkConfig: SinkConfig = {
+            id: sinkInfo?.id ?? sinkName,
+            name: whCfg.name,
+            sourceTable: (s.table as string) ?? "",
+            destination: ((s.destination as Record<string, unknown>)?.endpoint_url as string) ?? "",
+            filters: "",
+            batchSize: (s.batch_size as number) ?? 1,
+            transformId: baseTransformId,
+            enrichmentIds: baseEnrichmentId ? [baseEnrichmentId] : [],
+          };
+
+          const whTransformName = `${whCfg.name}_${parsed.color}-transform`;
+          const whTransformFn = functionsByName.get(whTransformName);
+          const whTransformConfig: TransformConfig = {
+            id: whTransformName,
+            name: `${whCfg.name}-transform`,
+            functionBody: ((whTransformFn?.code as string) ?? "").trim(),
+            inputSchema: "{}",
+            outputSchema: "{}",
+          };
+
+          const whEnrichmentName = `${whCfg.name}_${parsed.color}-enrichment`;
+          const whEnrichmentFn = functionsByName.get(whEnrichmentName);
+          const whEnrichmentConfig: EnrichmentConfig = {
+            id: whEnrichmentName,
+            name: `${whCfg.name}-enrichment`,
+            source: ((whEnrichmentFn?.code as string) ?? "").trim(),
+            joinColumn: "",
+            enrichmentColumns: "",
+          };
+
+          const whLifecycle: SinkLifecycle = sinkInfo?.status ?? "active";
+          const whBackfilling = sinkInfo ? isBackfilling(sinkInfo) : false;
+
+          parentState.webhooks.push({
+            sink: { config: whSinkConfig, lifecycle: whLifecycle, backfilling: whBackfilling },
+            transform: { config: whTransformConfig, status: whTransformFn ? "active" : "inactive" },
+            enrichment: { config: whEnrichmentConfig, status: whEnrichmentFn ? "active" : "inactive" },
+          });
+        }
+      }
     }
   }
 

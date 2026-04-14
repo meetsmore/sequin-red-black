@@ -101,6 +101,51 @@ export function generateSequinYaml(
       type: "enrichment",
       code: cfg.enrichment.source,
     });
+
+    // Generate webhook entries
+    for (const wh of cfg.webhooks) {
+      const whColoredName = `${wh.name}_${plan.targetColor}`;
+      const whTransformName = `${whColoredName}-transform`;
+      const whEnrichmentName = `${whColoredName}-enrichment`;
+
+      managedSinkNames.add(whColoredName);
+      managedFunctionNames.add(whTransformName);
+      managedFunctionNames.add(whEnrichmentName);
+
+      sinks.push({
+        name: whColoredName,
+        database: "source-db",
+        table: wh.sink.sourceTable,
+        batch_size: wh.sink.batchSize,
+        status: "active",
+        actions: ["insert", "update", "delete"],
+        timestamp_format: "iso8601",
+        message_grouping: true,
+        load_shedding_policy: "pause_on_full",
+        destination: {
+          type: "webhook",
+          endpoint_url: wh.sink.destination,
+          index_name: "",
+          auth_type: "none",
+          auth_value: "",
+          batch_size: wh.sink.batchSize,
+        },
+        transform: whTransformName,
+        enrichment: whEnrichmentName,
+      });
+
+      functions.push({
+        name: whTransformName,
+        type: "transform",
+        code: wh.transform.functionBody,
+      });
+
+      functions.push({
+        name: whEnrichmentName,
+        type: "enrichment",
+        code: wh.enrichment.source,
+      });
+    }
   }
 
   // Preserve existing entries not managed by srb

@@ -68,11 +68,11 @@ module commands {
           index: { config: cfg.index, status: if (is_reindex) IndexReindexing else IndexGreen, doc_count: 0 },
           transform: { config: cfg.transform, status: TransformActive },
           enrichment: { config: cfg.enrichment, status: EnrichmentActive },
-          syncs: cfg.syncs.foldl(List(), (a, sync) =>
+          webhooks: cfg.webhooks.foldl(List(), (a, wh) =>
             a.append({
-              sink: { config: sync.sink, lifecycle: SinkActive, backfilling: false },
-              transform: { config: sync.transform, status: TransformActive },
-              enrichment: { config: sync.enrichment, status: EnrichmentActive },
+              sink: { config: wh.sink, lifecycle: SinkActive, backfilling: false },
+              transform: { config: wh.transform, status: TransformActive },
+              enrichment: { config: wh.enrichment, status: EnrichmentActive },
             })
           ),
         })
@@ -228,7 +228,7 @@ module commands {
       index: { id: Iid(name), name: name, mappings: "{}", settings: "{}", alias: name },
       transform: { id: Tid(name), name: name, function_body: "identity", input_schema: "{}", output_schema: "{}" },
       enrichment: { id: Eid(name), name: name, source: name, join_column: "id", enrichment_columns: "name" },
-      syncs: List(),
+      webhooks: List(),
     }),
   }
 
@@ -249,7 +249,7 @@ module commands {
     )
 
   // 3. No partial resource groups — every live pipeline has all 4 resources with non-empty IDs,
-  //    and every sync within each pipeline has all 3 of its resources with non-empty IDs
+  //    and every webhook within each pipeline has all 3 of its resources with non-empty IDs
   val no_partial_pipelines: bool =
     live_pipelines.keys().forall(k =>
       val lp = live_pipelines.get(k)
@@ -258,10 +258,10 @@ module commands {
         lp.index.config.id != Iid(""),
         lp.transform.config.id != Tid(""),
         lp.enrichment.config.id != Eid(""),
-        lp.syncs.indices().forall(i => and {
-          lp.syncs[i].sink.config.id != Sid(""),
-          lp.syncs[i].transform.config.id != Tid(""),
-          lp.syncs[i].enrichment.config.id != Eid(""),
+        lp.webhooks.indices().forall(i => and {
+          lp.webhooks[i].sink.config.id != Sid(""),
+          lp.webhooks[i].transform.config.id != Tid(""),
+          lp.webhooks[i].enrichment.config.id != Eid(""),
         }),
       }
     )

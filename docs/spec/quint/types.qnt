@@ -121,10 +121,10 @@ module types {
   }
 
   // ---------------------------------------------------------------------------
-  // Sync — subordinate webhook sink that follows its parent pipeline's lifecycle
+  // Webhook — subordinate webhook sink that follows its parent pipeline's lifecycle
   // ---------------------------------------------------------------------------
 
-  type SyncConfig = {
+  type WebhookConfig = {
     name: str,
     sink: SinkConfig,
     transform: TransformConfig,
@@ -141,14 +141,14 @@ module types {
     index: IndexConfig,
     transform: TransformConfig,
     enrichment: EnrichmentConfig,
-    syncs: List[SyncConfig]
+    webhooks: List[WebhookConfig]
   }
 
   // ---------------------------------------------------------------------------
   // Live pipeline state — one per (pipeline, color) pair
   // ---------------------------------------------------------------------------
 
-  type LiveSyncState = {
+  type LiveWebhookState = {
     sink: SinkState,
     transform: TransformState,
     enrichment: EnrichmentState
@@ -159,7 +159,7 @@ module types {
     index: IndexState,
     transform: TransformState,
     enrichment: EnrichmentState,
-    syncs: List[LiveSyncState]
+    webhooks: List[LiveWebhookState]
   }
 
   // ---------------------------------------------------------------------------

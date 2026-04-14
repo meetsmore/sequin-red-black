@@ -52,7 +52,7 @@ module commands_test {
     index: fixture_index_config,
     transform: fixture_transform_config,
     enrichment: fixture_enrichment_config,
-    syncs: List(),
+    webhooks: List(),
   }
 
   pure val fixture_live_state: LivePipelineState = {
@@ -60,7 +60,7 @@ module commands_test {
     index: { config: fixture_index_config, status: IndexGreen, doc_count: 1000 },
     transform: { config: fixture_transform_config, status: TransformActive },
     enrichment: { config: fixture_enrichment_config, status: EnrichmentActive },
-    syncs: List(),
+    webhooks: List(),
   }
 
   // A second pipeline for multi-pipeline tests
@@ -105,14 +105,14 @@ module commands_test {
     index: fixture_clients_index,
     transform: fixture_clients_transform,
     enrichment: fixture_clients_enrichment,
-    syncs: List(),
+    webhooks: List(),
   }
 
   // ---------------------------------------------------------------------------
-  // Sync fixtures (address_to_jobs — webhook sink targeting jobs index)
+  // Webhook fixtures (address_to_jobs — webhook sink targeting jobs index)
   // ---------------------------------------------------------------------------
 
-  pure val fixture_sync_sink_config: SinkConfig = {
+  pure val fixture_webhook_sink_config: SinkConfig = {
     id: Sid("address_to_jobs_sink"),
     name: "address_to_jobs_sink",
     source_table: "addresses",
@@ -123,7 +123,7 @@ module commands_test {
     enrichment_ids: Set(Eid("address_to_jobs_enrichment")),
   }
 
-  pure val fixture_sync_transform_config: TransformConfig = {
+  pure val fixture_webhook_transform_config: TransformConfig = {
     id: Tid("address_to_jobs_transform"),
     name: "address_to_jobs_transform",
     function_body: "fn(row) => update_query(row)",
@@ -131,7 +131,7 @@ module commands_test {
     output_schema: "{ query: string }",
   }
 
-  pure val fixture_sync_enrichment_config: EnrichmentConfig = {
+  pure val fixture_webhook_enrichment_config: EnrichmentConfig = {
     id: Eid("address_to_jobs_enrichment"),
     name: "address_to_jobs_enrichment",
     source: "addresses",
@@ -139,36 +139,36 @@ module commands_test {
     enrichment_columns: "street",
   }
 
-  pure val fixture_sync_config: SyncConfig = {
+  pure val fixture_webhook_config: WebhookConfig = {
     name: "address_to_jobs",
-    sink: fixture_sync_sink_config,
-    transform: fixture_sync_transform_config,
-    enrichment: fixture_sync_enrichment_config,
+    sink: fixture_webhook_sink_config,
+    transform: fixture_webhook_transform_config,
+    enrichment: fixture_webhook_enrichment_config,
   }
 
-  pure val fixture_live_sync_state: LiveSyncState = {
-    sink: { config: fixture_sync_sink_config, lifecycle: SinkActive, backfilling: false },
-    transform: { config: fixture_sync_transform_config, status: TransformActive },
-    enrichment: { config: fixture_sync_enrichment_config, status: EnrichmentActive },
+  pure val fixture_live_webhook_state: LiveWebhookState = {
+    sink: { config: fixture_webhook_sink_config, lifecycle: SinkActive, backfilling: false },
+    transform: { config: fixture_webhook_transform_config, status: TransformActive },
+    enrichment: { config: fixture_webhook_enrichment_config, status: EnrichmentActive },
   }
 
-  // Pipeline config WITH a sync
-  pure val fixture_pipeline_with_sync: PipelineConfig = {
+  // Pipeline config WITH a webhook
+  pure val fixture_pipeline_with_webhook: PipelineConfig = {
     name: "jobs",
     sink: fixture_sink_config,
     index: fixture_index_config,
     transform: fixture_transform_config,
     enrichment: fixture_enrichment_config,
-    syncs: List(fixture_sync_config),
+    webhooks: List(fixture_webhook_config),
   }
 
-  // Live state WITH a sync
-  pure val fixture_live_with_sync: LivePipelineState = {
+  // Live state WITH a webhook
+  pure val fixture_live_with_webhook: LivePipelineState = {
     sink: { config: fixture_sink_config, lifecycle: SinkActive, backfilling: false },
     index: { config: fixture_index_config, status: IndexGreen, doc_count: 1000 },
     transform: { config: fixture_transform_config, status: TransformActive },
     enrichment: { config: fixture_enrichment_config, status: EnrichmentActive },
-    syncs: List(fixture_live_sync_state),
+    webhooks: List(fixture_live_webhook_state),
   }
 
   // ---------------------------------------------------------------------------
@@ -243,66 +243,66 @@ module commands_test {
   }
 
   // ---------------------------------------------------------------------------
-  // Sync tests
+  // Webhook tests
   // ---------------------------------------------------------------------------
 
-  // Test: sync change detected
-  run test_sync_has_changes_detects_difference = {
-    val modified_sync = { ...fixture_sync_config, sink: { ...fixture_sync_sink_config, filters: "status = active" } }
-    val modified_live = { ...fixture_live_sync_state, sink: { ...fixture_live_sync_state.sink, config: { ...fixture_sync_sink_config, filters: "" } } }
-    assert(sync_has_changes(modified_sync, modified_live))
+  // Test: webhook change detected
+  run test_webhook_has_changes_detects_difference = {
+    val modified_wh = { ...fixture_webhook_config, sink: { ...fixture_webhook_sink_config, filters: "status = active" } }
+    val modified_live = { ...fixture_live_webhook_state, sink: { ...fixture_live_webhook_state.sink, config: { ...fixture_webhook_sink_config, filters: "" } } }
+    assert(webhook_has_changes(modified_wh, modified_live))
   }
 
-  // Test: sync no change
-  run test_sync_has_changes_no_change = {
-    assert(not(sync_has_changes(fixture_sync_config, fixture_live_sync_state)))
+  // Test: webhook no change
+  run test_webhook_has_changes_no_change = {
+    assert(not(webhook_has_changes(fixture_webhook_config, fixture_live_webhook_state)))
   }
 
-  // Test: pipeline with sync detected as changed when sync added
-  run test_pipeline_has_changes_sync_added = {
-    // desired has 1 sync, live has 0 syncs
-    assert(pipeline_has_changes(fixture_pipeline_with_sync, fixture_live_state))
+  // Test: pipeline with webhook detected as changed when webhook added
+  run test_pipeline_has_changes_webhook_added = {
+    // desired has 1 webhook, live has 0 webhooks
+    assert(pipeline_has_changes(fixture_pipeline_with_webhook, fixture_live_state))
   }
 
-  // Test: pipeline with sync detected as changed when sync config differs
-  run test_pipeline_has_changes_sync_config_changed = {
-    val modified_sync = { ...fixture_sync_config, sink: { ...fixture_sync_sink_config, filters: "new_filter" } }
-    val desired = { ...fixture_pipeline_with_sync, syncs: List(modified_sync) }
-    assert(pipeline_has_changes(desired, fixture_live_with_sync))
+  // Test: pipeline with webhook detected as changed when webhook config differs
+  run test_pipeline_has_changes_webhook_config_changed = {
+    val modified_wh = { ...fixture_webhook_config, sink: { ...fixture_webhook_sink_config, filters: "new_filter" } }
+    val desired = { ...fixture_pipeline_with_webhook, webhooks: List(modified_wh) }
+    assert(pipeline_has_changes(desired, fixture_live_with_webhook))
   }
 
-  // Test: pipeline with sync has no changes when everything matches
-  run test_pipeline_has_changes_sync_no_change = {
-    assert(not(pipeline_has_changes(fixture_pipeline_with_sync, fixture_live_with_sync)))
+  // Test: pipeline with webhook has no changes when everything matches
+  run test_pipeline_has_changes_webhook_no_change = {
+    assert(not(pipeline_has_changes(fixture_pipeline_with_webhook, fixture_live_with_webhook)))
   }
 
-  // Test: effects_for_create with syncs includes 8 effects (5 primary + 3 sync)
-  run test_effects_for_create_with_sync_count = {
-    val effs = effects_for_create("jobs", fixture_pipeline_with_sync, Red)
-    // 5 primary (index, transform, enrichment, sink, backfill) + 3 sync (transform, enrichment, sink)
+  // Test: effects_for_create with webhooks includes 8 effects (5 primary + 3 webhook)
+  run test_effects_for_create_with_webhook_count = {
+    val effs = effects_for_create("jobs", fixture_pipeline_with_webhook, Red)
+    // 5 primary (index, transform, enrichment, sink, backfill) + 3 webhook (transform, enrichment, sink)
     assert(effs.length() == 8)
   }
 
-  // Test: sync sink depends on index (order 1) and its own transform/enrichment
-  run test_effects_for_create_with_sync_dependencies = {
-    val effs = effects_for_create("jobs", fixture_pipeline_with_sync, Red)
-    // Sync effects are at indices 5, 6, 7 (0-indexed)
-    // Sync sink (index 7) should depend on index creation (order 1)
-    val sync_sink = effs[7]
-    assert(sync_sink.depends_on.contains(1))
+  // Test: webhook sink depends on index (order 1) and its own transform/enrichment
+  run test_effects_for_create_with_webhook_dependencies = {
+    val effs = effects_for_create("jobs", fixture_pipeline_with_webhook, Red)
+    // Webhook effects are at indices 5, 6, 7 (0-indexed)
+    // Webhook sink (index 7) should depend on index creation (order 1)
+    val wh_sink = effs[7]
+    assert(wh_sink.depends_on.contains(1))
   }
 
-  // Test: effects_for_delete_color with syncs includes 7 effects (3 sync + 4 primary)
-  run test_effects_for_delete_with_sync_count = {
-    val effs = effects_for_delete_color("jobs", fixture_live_with_sync, Red)
-    // 3 sync deletes (sink, transform, enrichment) + 4 primary deletes (sink, transform, enrichment, index)
+  // Test: effects_for_delete_color with webhooks includes 7 effects (3 webhook + 4 primary)
+  run test_effects_for_delete_with_webhook_count = {
+    val effs = effects_for_delete_color("jobs", fixture_live_with_webhook, Red)
+    // 3 webhook deletes (sink, transform, enrichment) + 4 primary deletes (sink, transform, enrichment, index)
     assert(effs.length() == 7)
   }
 
-  // Test: sync-only change does NOT trigger needs_backfill
-  run test_sync_only_change_no_backfill = {
-    // Same primary config, different sync count
-    assert(not(needs_backfill(fixture_pipeline_with_sync, fixture_live_with_sync)))
+  // Test: webhook-only change does NOT trigger needs_backfill
+  run test_webhook_only_change_no_backfill = {
+    // Same primary config, different webhook count
+    assert(not(needs_backfill(fixture_pipeline_with_webhook, fixture_live_with_webhook)))
   }
 
   // Test: plan generation produces a plan for a new pipeline
@@ -1147,16 +1147,16 @@ module commands_test {
   }
 
   // ---------------------------------------------------------------------------
-  // Scenario: Pipeline with syncs — full lifecycle
-  // Deploy jobs pipeline with address_to_jobs sync, backfill, activate,
+  // Scenario: Pipeline with webhooks — full lifecycle
+  // Deploy jobs pipeline with address_to_jobs webhook, backfill, activate,
   // then update (new color), backfill again, activate new, drop old.
   // ---------------------------------------------------------------------------
 
-  run test_e2e_pipeline_with_syncs = {
+  run test_e2e_pipeline_with_webhooks = {
     init
-      // Load config with sync
-      .then(load_desired_config("jobs", fixture_pipeline_with_sync))
-      // Apply: creates primary + sync resources
+      // Load config with webhook
+      .then(load_desired_config("jobs", fixture_pipeline_with_webhook))
+      // Apply: creates primary + webhook resources
       .then(cmd_apply(false))
       .then(
         val color = deployed_color_for("jobs", live_pipelines)
@@ -1165,10 +1165,10 @@ module commands_test {
           assert(live_pipelines.keys().size() == 1),
           // Primary sink is backfilling
           assert(live_pipelines.get(("jobs", color)).sink.backfilling),
-          // Sync sink is NOT backfilling (syncs don't backfill)
-          assert(not(live_pipelines.get(("jobs", color)).syncs[0].sink.backfilling)),
-          // Sync sink is active
-          assert(live_pipelines.get(("jobs", color)).syncs[0].sink.lifecycle == SinkActive),
+          // Webhook sink is NOT backfilling (webhooks don't backfill)
+          assert(not(live_pipelines.get(("jobs", color)).webhooks[0].sink.backfilling)),
+          // Webhook sink is active
+          assert(live_pipelines.get(("jobs", color)).webhooks[0].sink.lifecycle == SinkActive),
           desired_pipelines' = desired_pipelines,
           live_pipelines' = live_pipelines,
           aliases' = aliases,
@@ -1188,8 +1188,8 @@ module commands_test {
         val color1 = aliases.get("jobs")
         all {
           assert("jobs".in(aliases.keys())),
-          // Still 1 sync in the live state
-          assert(live_pipelines.get(("jobs", color1)).syncs.length() == 1),
+          // Still 1 webhook in the live state
+          assert(live_pipelines.get(("jobs", color1)).webhooks.length() == 1),
           desired_pipelines' = desired_pipelines,
           live_pipelines' = live_pipelines,
           aliases' = aliases,
@@ -1199,7 +1199,7 @@ module commands_test {
       // Now update the transform (triggers new color with fresh backfill)
       .then(
         val updated_config: PipelineConfig = {
-          ...fixture_pipeline_with_sync,
+          ...fixture_pipeline_with_webhook,
           transform: { ...fixture_transform_config, function_body: "fn(row) => updated(row)" },
         }
         load_desired_config("jobs", updated_config)
@@ -1210,11 +1210,11 @@ module commands_test {
         all {
           // Now 2 colored variants exist (old + new)
           assert(live_pipelines.keys().size() == 2),
-          // Old color still has its sync
-          assert(live_pipelines.get(("jobs", color1)).syncs.length() == 1),
-          // New color also has a sync
+          // Old color still has its webhook
+          assert(live_pipelines.get(("jobs", color1)).webhooks.length() == 1),
+          // New color also has a webhook
           val color2 = ALL_COLORS.filter(c => c != color1 and ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
-          assert(live_pipelines.get(("jobs", color2)).syncs.length() == 1),
+          assert(live_pipelines.get(("jobs", color2)).webhooks.length() == 1),
           desired_pipelines' = desired_pipelines,
           live_pipelines' = live_pipelines,
           aliases' = aliases,
@@ -1239,9 +1239,9 @@ module commands_test {
       .then(all {
         // Only 1 colored variant remains (the new one)
         assert(live_pipelines.keys().size() == 1),
-        // That variant has the sync
+        // That variant has the webhook
         val color = aliases.get("jobs")
-        assert(live_pipelines.get(("jobs", color)).syncs.length() == 1),
+        assert(live_pipelines.get(("jobs", color)).webhooks.length() == 1),
         desired_pipelines' = desired_pipelines,
         live_pipelines' = live_pipelines,
         aliases' = aliases,
