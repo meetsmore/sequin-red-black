@@ -50,6 +50,10 @@ export interface WebhookConfig {
   sink: SinkConfig;
   transform: TransformConfig;
   enrichment: EnrichmentConfig;
+  /** Sequin HTTP endpoint name (e.g. "opensearch-update-by-query") */
+  httpEndpoint: string;
+  /** Path template with base index name (e.g. "/jobs/_update_by_query?conflicts=proceed") — color gets stamped in at deploy time */
+  httpEndpointPath: string;
 }
 
 // Live state

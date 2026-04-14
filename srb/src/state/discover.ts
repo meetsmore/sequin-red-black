@@ -241,11 +241,19 @@ export async function discoverLiveState(
             ? whCfg.name + enrichmentRef.slice(colorPrefix.length)
             : enrichmentRef;
 
+          // Read webhook destination path and strip color to get base path for comparison
+          const whDest = s.destination as Record<string, unknown> | undefined;
+          const liveHttpEndpointPath = (whDest?.http_endpoint_path as string) ?? "";
+          // Strip color from path: "/jobs_red/_update_by_query?..." → "/jobs/_update_by_query?..."
+          const baseHttpEndpointPath = liveHttpEndpointPath.replace(
+            `/${pipelineName}_${parsed.color}/`, `/${pipelineName}/`
+          );
+
           const whSinkConfig: SinkConfig = {
             id: sinkInfo?.id ?? sinkName,
             name: whCfg.name,
             sourceTable: (s.table as string) ?? "",
-            destination: ((s.destination as Record<string, unknown>)?.endpoint_url as string) ?? "",
+            destination: baseHttpEndpointPath,
             filters: "",
             batchSize: (s.batch_size as number) ?? 1,
             transformId: baseTransformId,

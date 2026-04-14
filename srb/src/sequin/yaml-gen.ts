@@ -1,5 +1,5 @@
 import * as yaml from "js-yaml";
-import type { Plan, PipelineConfig } from "../config/types.js";
+import type { Plan, PipelineConfig, Color } from "../config/types.js";
 import type { SequinConfigYaml } from "./cli.js";
 
 interface SinkYamlEntry {
@@ -12,16 +12,20 @@ interface SinkYamlEntry {
   timestamp_format: string;
   message_grouping: boolean;
   load_shedding_policy: string;
-  destination: {
-    type: string;
-    endpoint_url: string;
-    index_name: string;
-    auth_type: string;
-    auth_value: string;
-    batch_size: number;
-  };
+  destination: Record<string, unknown>;
   transform: string;
   enrichment: string;
+}
+
+/**
+ * Stamp color into a webhook endpoint path.
+ * Replaces the base index name with the colored variant.
+ * e.g. "/jobs/_update_by_query?..." with pipeline "jobs" and color "red"
+ *   => "/jobs_red/_update_by_query?..."
+ */
+export function colorizeWebhookPath(pathTemplate: string, pipeline: string, color: Color): string {
+  // The path starts with /<index_name>/... — replace the base index name with colored version
+  return pathTemplate.replace(`/${pipeline}/`, `/${pipeline}_${color}/`);
 }
 
 interface FunctionYamlEntry {
@@ -124,11 +128,9 @@ export function generateSequinYaml(
         load_shedding_policy: "pause_on_full",
         destination: {
           type: "webhook",
-          endpoint_url: wh.sink.destination,
-          index_name: "",
-          auth_type: "none",
-          auth_value: "",
-          batch_size: wh.sink.batchSize,
+          batch: false,
+          http_endpoint: wh.httpEndpoint,
+          http_endpoint_path: colorizeWebhookPath(wh.httpEndpointPath, plan.pipeline, plan.targetColor),
         },
         transform: whTransformName,
         enrichment: whEnrichmentName,

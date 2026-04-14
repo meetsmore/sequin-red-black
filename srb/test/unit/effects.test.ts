@@ -112,7 +112,7 @@ function fixtureWebhookSink(overrides?: Partial<SinkConfig>): SinkConfig {
     id: "sink-addr-to-jobs-red",
     name: "address_to_jobs_red",
     sourceTable: "public.Address",
-    destination: "opensearch://localhost:9200/_update_by_query",
+    destination: "/jobs/_update_by_query?conflicts=proceed&wait_for_completion=false",
     filters: "",
     batchSize: 1,
     transformId: "transform-addr-to-jobs-red",
@@ -153,6 +153,8 @@ function fixtureWebhook(overrides?: {
     sink: fixtureWebhookSink(overrides?.sink),
     transform: fixtureWebhookTransform(overrides?.transform),
     enrichment: fixtureWebhookEnrichment(overrides?.enrichment),
+    httpEndpoint: "opensearch-update-by-query",
+    httpEndpointPath: "/jobs/_update_by_query?conflicts=proceed&wait_for_completion=false",
   };
 }
 
@@ -670,5 +672,40 @@ describe("needsBackfill — webhook changes", () => {
     const desired = fixturePipelineWithWebhook();
     const live = fixtureLiveStateWithWebhook();
     expect(needsBackfill(desired, live)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// colorizeWebhookPath
+// ---------------------------------------------------------------------------
+
+import { colorizeWebhookPath } from "../../src/sequin/yaml-gen.js";
+
+describe("colorizeWebhookPath", () => {
+  test("stamps color into path", () => {
+    const result = colorizeWebhookPath(
+      "/jobs/_update_by_query?conflicts=proceed&wait_for_completion=false",
+      "jobs",
+      "red",
+    );
+    expect(result).toBe("/jobs_red/_update_by_query?conflicts=proceed&wait_for_completion=false");
+  });
+
+  test("handles different pipeline names", () => {
+    const result = colorizeWebhookPath(
+      "/buildings/_update_by_query?conflicts=proceed",
+      "buildings",
+      "black",
+    );
+    expect(result).toBe("/buildings_black/_update_by_query?conflicts=proceed");
+  });
+
+  test("handles purple color", () => {
+    const result = colorizeWebhookPath(
+      "/clients/_update_by_query",
+      "clients",
+      "purple",
+    );
+    expect(result).toBe("/clients_purple/_update_by_query");
   });
 });

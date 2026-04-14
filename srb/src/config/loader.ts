@@ -52,13 +52,18 @@ async function loadWebhook(name: string, webhooksDir: string): Promise<WebhookCo
   const enrichmentYaml = yaml.load(await Bun.file(path.join(dir, "enrichment.yaml")).text()) as RawFunctionYaml;
   const enrichmentSql = await Bun.file(path.join(dir, enrichmentYaml.code_file)).text();
 
+  // Read webhook-specific destination fields
+  const dest = sinkYaml.destination as Record<string, unknown> | undefined;
+  const httpEndpoint = (dest?.http_endpoint as string) ?? "";
+  const httpEndpointPath = (dest?.http_endpoint_path as string) ?? "";
+
   return {
     name,
     sink: {
       id: name,
       name: sinkYaml.name,
       sourceTable: sinkYaml.table ?? "",
-      destination: sinkYaml.destination?.endpoint_url ?? "",
+      destination: httpEndpointPath,
       filters: "",
       batchSize: sinkYaml.batch_size ?? 1,
       transformId: transformYaml.name,
@@ -78,6 +83,8 @@ async function loadWebhook(name: string, webhooksDir: string): Promise<WebhookCo
       joinColumn: "",
       enrichmentColumns: "",
     },
+    httpEndpoint,
+    httpEndpointPath,
   };
 }
 
