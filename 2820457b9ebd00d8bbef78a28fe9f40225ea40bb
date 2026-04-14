@@ -1,0 +1,35 @@
+README.md
+  7c2198be94e393ed 36-69,78,239,242,247,250,253,256-262,265
+install.sh
+  7c2198be94e393ed 1-43
+srb/src/online/opensearch/compare.ts
+  7c2198be94e393ed 1-2
+srb/src/opensearch/compare.ts
+  7c2198be94e393ed 1-36
+srb/src/opensearch/client.ts
+  7c2198be94e393ed 190-281
+srb/test/unit/compare.test.ts
+  7c2198be94e393ed 1-106
+srb/src/cli.ts
+  7c2198be94e393ed 9,67-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "2820457b9ebd00d8bbef78a28fe9f40225ea40bb",
+  "prompts": {
+    "7c2198be94e393ed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "59d62608-0d46-4015-9c25-0536d697bc88",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Zachary Davison",
+      "messages": [],
+      "total_additions": 805,
+      "total_deletions": 23,
+      "accepted_lines": 348,
+      "overriden_lines": 0
+    }
+  }
+}
