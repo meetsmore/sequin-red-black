@@ -52,6 +52,7 @@ module commands_test {
     index: fixture_index_config,
     transform: fixture_transform_config,
     enrichment: fixture_enrichment_config,
+    syncs: List(),
   }
 
   pure val fixture_live_state: LivePipelineState = {
@@ -59,6 +60,7 @@ module commands_test {
     index: { config: fixture_index_config, status: IndexGreen, doc_count: 1000 },
     transform: { config: fixture_transform_config, status: TransformActive },
     enrichment: { config: fixture_enrichment_config, status: EnrichmentActive },
+    syncs: List(),
   }
 
   // A second pipeline for multi-pipeline tests
@@ -103,6 +105,7 @@ module commands_test {
     index: fixture_clients_index,
     transform: fixture_clients_transform,
     enrichment: fixture_clients_enrichment,
+    syncs: List(),
   }
 
   // ---------------------------------------------------------------------------

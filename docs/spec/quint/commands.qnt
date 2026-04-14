@@ -68,6 +68,13 @@ module commands {
           index: { config: cfg.index, status: if (is_reindex) IndexReindexing else IndexGreen, doc_count: 0 },
           transform: { config: cfg.transform, status: TransformActive },
           enrichment: { config: cfg.enrichment, status: EnrichmentActive },
+          syncs: cfg.syncs.foldl(List(), (a, sync) =>
+            a.append({
+              sink: { config: sync.sink, lifecycle: SinkActive, backfilling: false },
+              transform: { config: sync.transform, status: TransformActive },
+              enrichment: { config: sync.enrichment, status: EnrichmentActive },
+            })
+          ),
         })
       }
     )
@@ -221,6 +228,7 @@ module commands {
       index: { id: Iid(name), name: name, mappings: "{}", settings: "{}", alias: name },
       transform: { id: Tid(name), name: name, function_body: "identity", input_schema: "{}", output_schema: "{}" },
       enrichment: { id: Eid(name), name: name, source: name, join_column: "id", enrichment_columns: "name" },
+      syncs: List(),
     }),
   }
 
