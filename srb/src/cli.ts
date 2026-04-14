@@ -6,6 +6,7 @@ import { applyCommand } from "./online/apply.js";
 import { activateCommand } from "./online/activate.js";
 import { backfillCommand } from "./online/backfill.js";
 import { dropCommand } from "./online/drop.js";
+import { compareIndexesCommand } from "./online/opensearch/compare.js";
 
 const program = new Command();
 program.name("srb").description("Red-Black Deployment Orchestrator").version("0.1.0");
@@ -62,5 +63,25 @@ addConnectionOpts(online.command("backfill").description("Trigger backfill").arg
 
 addConnectionOpts(online.command("drop").description("Drop a colored variant").argument("<pipeline>", "Pipeline name").argument("<color>", "Color to drop"))
   .action(async (pipeline: string, color: string, opts: Record<string, string>) => { await dropCommand(pipeline, color, getOnlineOpts(opts)); });
+
+// online opensearch subgroup (OpenSearch-only utilities)
+const onlineOpensearch = online.command("opensearch").description("OpenSearch utilities");
+
+onlineOpensearch.command("compare")
+  .description("Compare documents between two OpenSearch indexes")
+  .argument("<indexA>", "First index name")
+  .argument("<indexB>", "Second index name")
+  .option("--sample <fraction>", "Fraction of docs to randomly sample (e.g. 0.01 = 1%)", parseFloat)
+  .option("--opensearch-url <url>", "OpenSearch URL (env: SRB_OPENSEARCH_URL)", process.env.SRB_OPENSEARCH_URL || "http://localhost:9200")
+  .option("--opensearch-user <user>", "OpenSearch user (env: SRB_OPENSEARCH_USER)", process.env.SRB_OPENSEARCH_USER)
+  .option("--opensearch-password <pass>", "OpenSearch password (env: SRB_OPENSEARCH_PASSWORD)", process.env.SRB_OPENSEARCH_PASSWORD)
+  .action(async (indexA: string, indexB: string, opts: Record<string, string>) => {
+    await compareIndexesCommand(indexA, indexB, {
+      opensearchUrl: opts.opensearchUrl,
+      opensearchUser: opts.opensearchUser,
+      opensearchPassword: opts.opensearchPassword,
+      sample: opts.sample ? parseFloat(opts.sample) : undefined,
+    });
+  });
 
 program.parse();

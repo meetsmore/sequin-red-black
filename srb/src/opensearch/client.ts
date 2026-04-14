@@ -187,6 +187,98 @@ export class OpenSearchClient {
     }
   }
 
+  async getDocCount(index: string): Promise<number> {
+    const res = await this.fetch(`/${index}/_count`);
+    if (!res.ok) {
+      throw new Error(`OpenSearch GET /${index}/_count: ${res.status} ${await res.text()}`);
+    }
+    const data = (await res.json()) as { count: number };
+    return data.count;
+  }
+
+  /**
+   * Scroll through all documents in an index, yielding batches.
+   * Each batch is a Map from _id to _source.
+   * @param batchSize Number of docs per scroll page
+   */
+  async *scrollDocs(
+    index: string,
+    batchSize = 1000,
+  ): AsyncGenerator<Map<string, Record<string, unknown>>> {
+    // Initial search with scroll
+    const res = await this.fetch(`/${index}/_search?scroll=2m`, {
+      method: "POST",
+      body: JSON.stringify({
+        size: batchSize,
+        sort: ["_doc"],
+        query: { match_all: {} },
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`OpenSearch scroll init /${index}: ${res.status} ${await res.text()}`);
+    }
+
+    let data = (await res.json()) as {
+      _scroll_id: string;
+      hits: { hits: { _id: string; _source: Record<string, unknown> }[] };
+    };
+
+    while (data.hits.hits.length > 0) {
+      const batch = new Map<string, Record<string, unknown>>();
+      for (const hit of data.hits.hits) {
+        batch.set(hit._id, hit._source);
+      }
+      yield batch;
+
+      // Fetch next page
+      const scrollRes = await this.fetch("/_search/scroll", {
+        method: "POST",
+        body: JSON.stringify({
+          scroll: "2m",
+          scroll_id: data._scroll_id,
+        }),
+      });
+      if (!scrollRes.ok) break;
+      data = (await scrollRes.json()) as typeof data;
+    }
+
+    // Clean up scroll context
+    if (data._scroll_id) {
+      await this.fetch("/_search/scroll", {
+        method: "DELETE",
+        body: JSON.stringify({ scroll_id: [data._scroll_id] }),
+      }).catch(() => {});
+    }
+  }
+
+  /**
+   * Fetch specific documents by _id from an index.
+   * Returns a Map from _id to _source.
+   */
+  async getDocsByIds(
+    index: string,
+    ids: string[],
+  ): Promise<Map<string, Record<string, unknown>>> {
+    if (ids.length === 0) return new Map();
+    const res = await this.fetch(`/${index}/_mget`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) {
+      throw new Error(`OpenSearch _mget /${index}: ${res.status} ${await res.text()}`);
+    }
+    const data = (await res.json()) as {
+      docs: { _id: string; found: boolean; _source?: Record<string, unknown> }[];
+    };
+    const result = new Map<string, Record<string, unknown>>();
+    for (const doc of data.docs) {
+      if (doc.found && doc._source) {
+        result.set(doc._id, doc._source);
+      }
+    }
+    return result;
+  }
+
   async triggerReindex(source: string, target: string): Promise<void> {
     const res = await this.fetch("/_reindex?wait_for_completion=false", {
       method: "POST",

@@ -33,15 +33,49 @@ Each pipeline bundles four resources:
 - **Transform** — Elixir function that shapes each record
 - **Enrichment** — SQL query that joins additional data
 
+## Install
+
+Pre-compiled binaries are available from [GitHub Releases](../../releases) for Linux (amd64 and arm64).
+
+### Quick install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sequin-io/sequin-red-black/main/install.sh | bash
+```
+
+This detects your architecture, downloads the latest binary, and installs it to `/usr/local/bin/srb`.
+
+### Manual install
+
+```bash
+# Pick your architecture
+ARTIFACT="srb-linux-amd64"   # or srb-linux-arm64
+
+# Download latest release (requires GitHub CLI)
+gh release download --repo sequin-io/sequin-red-black --pattern "$ARTIFACT" --dir /tmp
+chmod +x /tmp/$ARTIFACT
+sudo mv /tmp/$ARTIFACT /usr/local/bin/srb
+
+# Or download a specific version
+gh release download v0.1.0 --repo sequin-io/sequin-red-black --pattern "$ARTIFACT" --dir /tmp
+```
+
+### Build from source
+
+```bash
+cd srb && bun install && bun run build
+# Produces ./srb binary
+```
+
 ## Example walkthrough
 
 This walks through a complete red-black deployment using the included example stack.
 
 ### Prerequisites
 
-- [Bun](https://bun.sh)
 - [Docker](https://docker.com)
 - [Sequin CLI](https://sequinstream.com/docs/cli)
+- [Bun](https://bun.sh) (for the example stack only)
 
 ### 1. Start the stack
 
@@ -201,30 +235,34 @@ Stops all Docker containers and removes volumes.
 ## CLI reference
 
 ```bash
-cd srb && bun install
-
 # Compile per-pipeline configs to a single JSON file
-bun run src/cli.ts offline compile --indexes ../example/indexes --out compiled.json
+srb offline compile --indexes ./indexes --out compiled.json
 
 # Plan: diff compiled config vs live state
-bun run src/cli.ts online plan --compiled compiled.json \
+srb online plan --compiled compiled.json \
   --sequin-context srb-local --sequin-url http://localhost:7376 \
   --sequin-token <token> --opensearch-url http://localhost:9200
 
 # Apply: plan + execute
-bun run src/cli.ts online apply --compiled compiled.json --auto-approve [--skip-backfill]
+srb online apply --compiled compiled.json --auto-approve [--skip-backfill]
 
 # Activate: swap alias to a color
-bun run src/cli.ts online activate <pipeline> <color>
+srb online activate <pipeline> <color>
 
 # Backfill: manually trigger (when --skip-backfill was used)
-bun run src/cli.ts online backfill <pipeline> <color>
+srb online backfill <pipeline> <color>
 
 # Drop: delete a colored variant
-bun run src/cli.ts online drop <pipeline> <color>
+srb online drop <pipeline> <color>
+
+# Compare: diff documents between two OpenSearch indexes
+srb online opensearch compare <indexA> <indexB>
+
+# Compare with sampling (e.g. 1% of docs)
+srb online opensearch compare <indexA> <indexB> --sample 0.01
 ```
 
-Exit codes: `0` = success/no changes, `1` = error, `2` = changes pending (plan).
+Exit codes: `0` = success/no changes, `1` = error/differences found, `2` = changes pending (plan).
 
 ## Pipeline config
 
