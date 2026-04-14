@@ -70,6 +70,14 @@ module effects {
       desired.enrichment_columns != live.enrichment_columns,
     }
 
+  // Compare a sync's config against its live state
+  pure def sync_has_changes(desired: SyncConfig, live: LiveSyncState): bool =
+    or {
+      sink_config_changed(desired.sink, live.sink.config),
+      transform_config_changed(desired.transform, live.transform.config),
+      enrichment_config_changed(desired.enrichment, live.enrichment.config),
+    }
+
   // Check if any resource in a pipeline has changed
   pure def pipeline_has_changes(desired: PipelineConfig, live: LivePipelineState): bool =
     or {
@@ -77,6 +85,10 @@ module effects {
       index_config_changed(desired.index, live.index.config),
       transform_config_changed(desired.transform, live.transform.config),
       enrichment_config_changed(desired.enrichment, live.enrichment.config),
+      desired.syncs.length() != live.syncs.length(),
+      desired.syncs.indices().exists(i =>
+        i < live.syncs.length() and sync_has_changes(desired.syncs[i], live.syncs[i])
+      ),
     }
 
   // Does this pipeline need a full backfill? True when document content must change:
