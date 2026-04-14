@@ -127,13 +127,22 @@ module effects {
     desired: PipelineConfig,
     target_color: Color
   ): List[PlannedEffect] =
-    List(
+    val primary = List(
       { effect: CreateIndex(desired.index), status: Pending, depends_on: Set(), order: 1 },
       { effect: CreateTransform(desired.transform), status: Pending, depends_on: Set(), order: 2 },
       { effect: CreateEnrichment(desired.enrichment), status: Pending, depends_on: Set(), order: 3 },
       { effect: CreateSink(desired.sink), status: Pending, depends_on: Set(1, 2, 3), order: 4 },
       { effect: TriggerBackfill(desired.sink.id), status: Pending, depends_on: Set(4), order: 5 },
     )
+    val sync_effects = desired.syncs.foldl(List(), (acc, sync) =>
+      val base = 5 + acc.length()
+      acc.concat(List(
+        { effect: CreateTransform(sync.transform), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: CreateEnrichment(sync.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
+        { effect: CreateSink(sync.sink), status: Pending, depends_on: Set(1, base + 1, base + 2), order: base + 3 },
+      ))
+    )
+    primary.concat(sync_effects)
 
   // Effects for deleting all colored variants of a pipeline
   pure def effects_for_delete_color(
@@ -141,12 +150,23 @@ module effects {
     live: LivePipelineState,
     color: Color
   ): List[PlannedEffect] =
-    List(
-      { effect: DeleteSink(live.sink.config.id), status: Pending, depends_on: Set(), order: 1 },
-      { effect: DeleteTransform(live.transform.config.id), status: Pending, depends_on: Set(1), order: 2 },
-      { effect: DeleteEnrichment(live.enrichment.config.id), status: Pending, depends_on: Set(1), order: 3 },
-      { effect: DeleteIndex(live.index.config.id), status: Pending, depends_on: Set(1, 2, 3), order: 4 },
+    // Delete sync sinks first (they depend on the index)
+    val sync_deletes = live.syncs.foldl(List(), (acc, sync) =>
+      val base = acc.length()
+      acc.concat(List(
+        { effect: DeleteSink(sync.sink.config.id), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: DeleteTransform(sync.transform.config.id), status: Pending, depends_on: Set(base + 1), order: base + 2 },
+        { effect: DeleteEnrichment(sync.enrichment.config.id), status: Pending, depends_on: Set(base + 1), order: base + 3 },
+      ))
     )
+    val p_base = sync_deletes.length()
+    val primary_deletes = List(
+      { effect: DeleteSink(live.sink.config.id), status: Pending, depends_on: Set(), order: p_base + 1 },
+      { effect: DeleteTransform(live.transform.config.id), status: Pending, depends_on: Set(p_base + 1), order: p_base + 2 },
+      { effect: DeleteEnrichment(live.enrichment.config.id), status: Pending, depends_on: Set(p_base + 1), order: p_base + 3 },
+      { effect: DeleteIndex(live.index.config.id), status: Pending, depends_on: Set(p_base + 1, p_base + 2, p_base + 3), order: p_base + 4 },
+    )
+    sync_deletes.concat(primary_deletes)
 
   // Effects for reindexing — only index config changed, documents are already correct.
   // Creates a new colored variant with a new index, then reindexes from the old index
@@ -157,13 +177,22 @@ module effects {
     source_index: IndexId,
     target_color: Color
   ): List[PlannedEffect] =
-    List(
+    val primary = List(
       { effect: CreateIndex(desired.index), status: Pending, depends_on: Set(), order: 1 },
       { effect: CreateTransform(desired.transform), status: Pending, depends_on: Set(), order: 2 },
       { effect: CreateEnrichment(desired.enrichment), status: Pending, depends_on: Set(), order: 3 },
       { effect: CreateSink(desired.sink), status: Pending, depends_on: Set(1, 2, 3), order: 4 },
       { effect: TriggerReindex({ source: source_index, target: desired.index.id }), status: Pending, depends_on: Set(1, 4), order: 5 },
     )
+    val sync_effects = desired.syncs.foldl(List(), (acc, sync) =>
+      val base = 5 + acc.length()
+      acc.concat(List(
+        { effect: CreateTransform(sync.transform), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: CreateEnrichment(sync.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
+        { effect: CreateSink(sync.sink), status: Pending, depends_on: Set(1, base + 1, base + 2), order: base + 3 },
+      ))
+    )
+    primary.concat(sync_effects)
 
   // Effects for in-place update — only operational fields changed (e.g. batch_size).
   // No new color, no backfill, no reindex. Just update the existing sink config.
