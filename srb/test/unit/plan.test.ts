@@ -19,6 +19,7 @@ function fixtureSink(overrides?: Partial<SinkConfig>): SinkConfig {
   return {
     id: "sink-jobs-red",
     name: "jobs_red",
+    database: "source-db",
     sourceTable: "public.Job",
     destination: "opensearch://localhost:9200/jobs_red",
     filters: "showInKanban = true",
@@ -99,6 +100,7 @@ function fixtureClientPipeline(): PipelineConfig {
     sink: {
       id: "sink-clients-red",
       name: "clients_red",
+      database: "source-db",
       sourceTable: "public.Client",
       destination: "opensearch://localhost:9200/clients_red",
       filters: "isArchive = false",

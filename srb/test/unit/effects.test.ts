@@ -33,6 +33,7 @@ function fixtureSink(overrides?: Partial<SinkConfig>): SinkConfig {
   return {
     id: "sink-jobs-red",
     name: "jobs_red",
+    database: "source-db",
     sourceTable: "public.Job",
     destination: "opensearch://localhost:9200/jobs_red",
     filters: "showInKanban = true",
@@ -111,6 +112,7 @@ function fixtureWebhookSink(overrides?: Partial<SinkConfig>): SinkConfig {
   return {
     id: "sink-addr-to-jobs-red",
     name: "address_to_jobs_red",
+    database: "source-db",
     sourceTable: "public.Address",
     destination: "/jobs/_update_by_query?conflicts=proceed&wait_for_completion=false",
     filters: "",

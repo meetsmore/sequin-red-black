@@ -72,7 +72,7 @@ export function generateSequinYaml(
     // Generate sink entry
     sinks.push({
       name: coloredName,
-      database: "source-db",
+      database: cfg.sink.database,
       table: cfg.sink.sourceTable,
       batch_size: cfg.sink.batchSize,
       status: "active",
@@ -118,7 +118,7 @@ export function generateSequinYaml(
 
       sinks.push({
         name: whColoredName,
-        database: "source-db",
+        database: cfg.sink.database,
         table: wh.sink.sourceTable,
         batch_size: wh.sink.batchSize,
         status: "active",

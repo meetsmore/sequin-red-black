@@ -125,6 +125,7 @@ export async function discoverLiveState(
       const sinkConfig: SinkConfig = {
         id: sinkInfo?.id ?? sinkName, // Sequin UUID — needed for API calls
         name: pipeline, // base name for comparison
+        database: (s.database as string) ?? "",
         sourceTable,
         destination: (dest?.endpoint_url as string) ?? "",
         filters: "",
@@ -252,6 +253,7 @@ export async function discoverLiveState(
           const whSinkConfig: SinkConfig = {
             id: sinkInfo?.id ?? sinkName,
             name: whCfg.name,
+            database: (s.database as string) ?? "",
             sourceTable: (s.table as string) ?? "",
             destination: baseHttpEndpointPath,
             filters: "",

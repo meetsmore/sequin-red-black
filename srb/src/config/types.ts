@@ -4,6 +4,8 @@ export const ALL_COLORS: Color[] = ["red", "black", "blue", "green", "purple", "
 export interface SinkConfig {
   id: string;
   name: string;
+  /** @example "meetsone-db" */
+  database: string;
   sourceTable: string;
   destination: string;
   filters: string;

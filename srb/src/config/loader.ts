@@ -56,6 +56,7 @@ async function loadWebhook(name: string, webhooksDir: string): Promise<WebhookCo
     sink: {
       id: name,
       name: sinkYaml.name,
+      database: sinkYaml.database,
       sourceTable: sinkYaml.table ?? "",
       destination: httpEndpointPath,
       filters: "",
@@ -105,6 +106,7 @@ export async function loadPipeline(name: string, indexesDir: string): Promise<Pi
     sink: {
       id: name,
       name: sinkYaml.name,
+      database: sinkYaml.database,
       sourceTable: sinkYaml.table,
       destination: sinkYaml.destination.endpoint_url,
       filters: "",

@@ -10,6 +10,7 @@ export const jobsConfig: PipelineConfig = {
   sink: {
     id: "jobs",
     name: "jobs",
+    database: "source-db",
     sourceTable: "public.Job",
     destination: "http://opensearch:9200",
     filters: "",
@@ -48,6 +49,7 @@ export const clientsConfig: PipelineConfig = {
   sink: {
     id: "clients",
     name: "clients",
+    database: "source-db",
     sourceTable: "public.Client",
     destination: "http://opensearch:9200",
     filters: "",
