@@ -29,7 +29,12 @@ fi
 curl -fsSL -o "$TMPDIR/$ARTIFACT" "$URL"
 
 chmod +x "$TMPDIR/$ARTIFACT"
-sudo mv "$TMPDIR/$ARTIFACT" "$INSTALL_DIR/srb"
+# Use sudo if available (CI runners), skip if already root (containers)
+if command -v sudo &>/dev/null && [ "$(id -u)" -ne 0 ]; then
+  sudo mv "$TMPDIR/$ARTIFACT" "$INSTALL_DIR/srb"
+else
+  mv "$TMPDIR/$ARTIFACT" "$INSTALL_DIR/srb"
+fi
 
 echo "Installed srb to $INSTALL_DIR/srb"
 srb --version
