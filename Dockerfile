@@ -4,7 +4,7 @@ LABEL org.opencontainers.image.source=https://github.com/meetsmore/sequin-red-bl
 
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
-      curl ca-certificates unzip && \
+      curl ca-certificates unzip postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Sequin CLI
