@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="sequin-io/sequin-red-black"
+REPO="meetsmore/sequin-red-black"
 INSTALL_DIR="/usr/local/bin"
 
 # Detect architecture

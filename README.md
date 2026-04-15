@@ -40,7 +40,7 @@ Pre-compiled binaries are available from [GitHub Releases](../../releases) for L
 ### Quick install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sequin-io/sequin-red-black/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/meetsmore/sequin-red-black/main/install.sh | bash
 ```
 
 This detects your architecture, downloads the latest binary, and installs it to `/usr/local/bin/srb`.
@@ -52,12 +52,12 @@ This detects your architecture, downloads the latest binary, and installs it to 
 ARTIFACT="srb-linux-amd64"   # or srb-linux-arm64
 
 # Download latest release (requires GitHub CLI)
-gh release download --repo sequin-io/sequin-red-black --pattern "$ARTIFACT" --dir /tmp
+gh release download --repo meetsmore/sequin-red-black --pattern "$ARTIFACT" --dir /tmp
 chmod +x /tmp/$ARTIFACT
 sudo mv /tmp/$ARTIFACT /usr/local/bin/srb
 
 # Or download a specific version
-gh release download v0.1.0 --repo sequin-io/sequin-red-black --pattern "$ARTIFACT" --dir /tmp
+gh release download v0.1.0 --repo meetsmore/sequin-red-black --pattern "$ARTIFACT" --dir /tmp
 ```
 
 ### Build from source

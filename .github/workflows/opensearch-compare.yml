@@ -67,7 +67,7 @@ jobs:
       - name: Install SRB
         env:
           SRB_VERSION: ${{ inputs.srb-version }}
-        run: curl -fsSL https://raw.githubusercontent.com/sequin-io/sequin-red-black/main/install.sh | bash
+        run: curl -fsSL https://raw.githubusercontent.com/meetsmore/sequin-red-black/main/install.sh | bash
 
       - name: Compare indexes
         run: |
