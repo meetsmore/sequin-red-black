@@ -29,16 +29,15 @@ export class SequinCLI {
 
   async apply(yamlPath: string): Promise<void> {
     const proc = Bun.spawn(["sequin", "config", "apply", yamlPath, "--auto-approve", ...this.contextArgs()], {
-      stdout: "pipe",
+      stdout: "inherit",
       stderr: "pipe",
     });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
+    const [stderr, exitCode] = await Promise.all([
       new Response(proc.stderr).text(),
       proc.exited,
     ]);
     if (exitCode !== 0) {
-      throw new Error(`sequin config apply failed (exit ${exitCode}): ${stderr}\n${stdout}`);
+      throw new Error(`sequin config apply failed (exit ${exitCode}): ${stderr}`);
     }
   }
 
