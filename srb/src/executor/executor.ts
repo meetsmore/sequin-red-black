@@ -154,12 +154,14 @@ async function executeSequinBatch(
   const yaml = generateSequinYaml([plan], desired);
   const tmpFile = path.join(tmpdir(), `srb-sequin-${Date.now()}.yaml`);
 
+  await fs.writeFile(tmpFile, yaml, "utf-8");
+  log(`Applying Sequin config from ${tmpFile} (${batch.length} effects)`);
   try {
-    await fs.writeFile(tmpFile, yaml, "utf-8");
-    log(`Applying Sequin config from ${tmpFile} (${batch.length} effects)`);
     await opts.sequinCli.apply(tmpFile);
+  } catch (err) {
+    log(`Sequin config YAML that failed:\n${yaml}`);
+    throw err;
   } finally {
-    // Clean up temp file
     await fs.unlink(tmpFile).catch(() => {});
   }
 }
