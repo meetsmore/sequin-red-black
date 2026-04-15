@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="meetsmore/sequin-red-black"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${SRB_INSTALL_DIR:-/usr/local/bin}"
 
 # Detect architecture
 ARCH=$(uname -m)
