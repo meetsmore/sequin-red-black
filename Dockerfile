@@ -1,5 +1,7 @@
 FROM debian:bookworm-slim
 
+LABEL org.opencontainers.image.source=https://github.com/meetsmore/sequin-red-black
+
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
       curl ca-certificates unzip && \
