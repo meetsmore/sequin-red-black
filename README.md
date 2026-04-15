@@ -273,13 +273,13 @@ indexes/
   jobs/
     index.ts           # OpenSearch mappings + settings (TypeScript)
     sink.yaml          # Sequin sink config
-    transform.yaml     # Points to transform.ex
     transform.ex       # Elixir transform function
-    enrichment.yaml    # Points to enrichment.sql
     enrichment.sql     # SQL enrichment query
   clients/
     (same structure)
 ```
+
+Names are inferred by convention: `<pipeline>-transform` and `<pipeline>-enrichment`.
 
 `srb offline compile` reads these directories and produces a `compiled.json` that all online commands consume.
 

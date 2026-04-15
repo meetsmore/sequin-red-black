@@ -24,12 +24,6 @@ interface RawSinkYaml {
   [key: string]: unknown;
 }
 
-interface RawFunctionYaml {
-  name: string;
-  type: string;
-  code_file: string;
-}
-
 async function loadWebhooks(pipelineDir: string): Promise<WebhookConfig[]> {
   const webhooksDir = path.join(pipelineDir, "webhooks");
   try {
@@ -47,10 +41,10 @@ async function loadWebhook(name: string, webhooksDir: string): Promise<WebhookCo
   const dir = path.join(webhooksDir, name);
 
   const sinkYaml = yaml.load(await Bun.file(path.join(dir, "sink.yaml")).text()) as RawSinkYaml;
-  const transformYaml = yaml.load(await Bun.file(path.join(dir, "transform.yaml")).text()) as RawFunctionYaml;
-  const transformBody = await Bun.file(path.join(dir, transformYaml.code_file)).text();
-  const enrichmentYaml = yaml.load(await Bun.file(path.join(dir, "enrichment.yaml")).text()) as RawFunctionYaml;
-  const enrichmentSql = await Bun.file(path.join(dir, enrichmentYaml.code_file)).text();
+  const transformName = `${name}-transform`;
+  const enrichmentName = `${name}-enrichment`;
+  const transformBody = await Bun.file(path.join(dir, "transform.ex")).text();
+  const enrichmentSql = await Bun.file(path.join(dir, "enrichment.sql")).text();
 
   // Read webhook-specific destination fields
   const dest = sinkYaml.destination as Record<string, unknown> | undefined;
@@ -66,19 +60,19 @@ async function loadWebhook(name: string, webhooksDir: string): Promise<WebhookCo
       destination: httpEndpointPath,
       filters: "",
       batchSize: sinkYaml.batch_size ?? 1,
-      transformId: transformYaml.name,
-      enrichmentIds: [enrichmentYaml.name],
+      transformId: transformName,
+      enrichmentIds: [enrichmentName],
     },
     transform: {
-      id: transformYaml.name,
-      name: transformYaml.name,
+      id: transformName,
+      name: transformName,
       functionBody: transformBody.trim(),
       inputSchema: "{}",
       outputSchema: "{}",
     },
     enrichment: {
-      id: enrichmentYaml.name,
-      name: enrichmentYaml.name,
+      id: enrichmentName,
+      name: enrichmentName,
       source: enrichmentSql.trim(),
       joinColumn: "",
       enrichmentColumns: "",
@@ -98,13 +92,13 @@ export async function loadPipeline(name: string, indexesDir: string): Promise<Pi
   // 2. Read sink.yaml
   const sinkYaml = yaml.load(await Bun.file(path.join(dir, "sink.yaml")).text()) as RawSinkYaml;
 
-  // 3. Read transform.yaml + inline code file
-  const transformYaml = yaml.load(await Bun.file(path.join(dir, "transform.yaml")).text()) as RawFunctionYaml;
-  const transformBody = await Bun.file(path.join(dir, transformYaml.code_file)).text();
+  // 3. Read transform code file (convention: <pipeline>-transform)
+  const transformName = `${name}-transform`;
+  const transformBody = await Bun.file(path.join(dir, "transform.ex")).text();
 
-  // 4. Read enrichment.yaml + inline code file
-  const enrichmentYaml = yaml.load(await Bun.file(path.join(dir, "enrichment.yaml")).text()) as RawFunctionYaml;
-  const enrichmentSql = await Bun.file(path.join(dir, enrichmentYaml.code_file)).text();
+  // 4. Read enrichment code file (convention: <pipeline>-enrichment)
+  const enrichmentName = `${name}-enrichment`;
+  const enrichmentSql = await Bun.file(path.join(dir, "enrichment.sql")).text();
 
   return {
     name,
@@ -115,8 +109,8 @@ export async function loadPipeline(name: string, indexesDir: string): Promise<Pi
       destination: sinkYaml.destination.endpoint_url,
       filters: "",
       batchSize: sinkYaml.batch_size,
-      transformId: transformYaml.name,
-      enrichmentIds: [enrichmentYaml.name],
+      transformId: transformName,
+      enrichmentIds: [enrichmentName],
     },
     index: {
       id: name,
@@ -126,15 +120,15 @@ export async function loadPipeline(name: string, indexesDir: string): Promise<Pi
       alias: name,
     },
     transform: {
-      id: transformYaml.name,
-      name: transformYaml.name,
+      id: transformName,
+      name: transformName,
       functionBody: transformBody.trim(),
       inputSchema: "{}",
       outputSchema: "{}",
     },
     enrichment: {
-      id: enrichmentYaml.name,
-      name: enrichmentYaml.name,
+      id: enrichmentName,
+      name: enrichmentName,
       source: enrichmentSql.trim(),
       joinColumn: "",
       enrichmentColumns: "",

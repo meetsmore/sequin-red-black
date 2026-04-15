@@ -1,3 +1,0 @@
-name: jobs-enrichment
-type: enrichment
-code_file: enrichment.sql

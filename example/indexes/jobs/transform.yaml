@@ -1,3 +1,0 @@
-name: jobs-transform
-type: transform
-code_file: transform.ex
