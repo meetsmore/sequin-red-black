@@ -166,15 +166,15 @@ function formatEffect(effect: Effect, pipeline: string, color: Color): string {
   const colored = `${pipeline}_${color}`;
   switch (effect.kind) {
     case "CreateIndex":
-      return `${green("+")} create index ${cyan(`"${colored}"`)}`;
+      return `${green("+")} create index ${cyan(`"${effect.index.name}"`)}`;
     case "CreateTransform":
-      return `${green("+")} create function ${cyan(`"${colored}-transform"`)}`;
+      return `${green("+")} create function ${cyan(`"${effect.transform.name}"`)}`;
     case "CreateEnrichment":
-      return `${green("+")} create function ${cyan(`"${colored}-enrichment"`)}`;
+      return `${green("+")} create function ${cyan(`"${effect.enrichment.name}"`)}`;
     case "CreateSink":
-      return `${green("+")} create sink ${cyan(`"${colored}"`)}`;
+      return `${green("+")} create sink ${cyan(`"${effect.sink.name}"`)}`;
     case "UpdateSink":
-      return `${yellow("~")} update sink ${cyan(`"${colored}"`)}`;
+      return `${yellow("~")} update sink ${cyan(`"${effect.config.name}"`)}`;
     case "DeleteSink":
       return `${red("-")} delete sink ${cyan(`"${effect.id}"`)}`;
     case "DeleteTransform":
@@ -184,7 +184,7 @@ function formatEffect(effect: Effect, pipeline: string, color: Color): string {
     case "DeleteIndex":
       return `${red("-")} delete index ${cyan(`"${effect.id}"`)}`;
     case "TriggerBackfill":
-      return `${yellow("~")} trigger backfill on ${cyan(`"${colored}"`)}`;
+      return `${yellow("~")} trigger backfill on ${cyan(`"${effect.sinkId}"`)}`;
     case "TriggerReindex":
       return `${yellow("~")} trigger reindex ${cyan(`"${effect.source}"`)} → ${cyan(`"${effect.target}"`)}`;
     case "SwapAlias":
