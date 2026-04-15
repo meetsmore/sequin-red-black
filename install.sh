@@ -21,20 +21,12 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 # Download binary
-if command -v gh &>/dev/null; then
-  if [ "$VERSION" = "latest" ]; then
-    gh release download --repo "$REPO" --pattern "$ARTIFACT" --dir "$TMPDIR"
-  else
-    gh release download "$VERSION" --repo "$REPO" --pattern "$ARTIFACT" --dir "$TMPDIR"
-  fi
+if [ "$VERSION" = "latest" ]; then
+  URL="https://github.com/$REPO/releases/latest/download/$ARTIFACT"
 else
-  if [ "$VERSION" = "latest" ]; then
-    URL="https://github.com/$REPO/releases/latest/download/$ARTIFACT"
-  else
-    URL="https://github.com/$REPO/releases/download/$VERSION/$ARTIFACT"
-  fi
-  curl -fsSL -o "$TMPDIR/$ARTIFACT" "$URL"
+  URL="https://github.com/$REPO/releases/download/$VERSION/$ARTIFACT"
 fi
+curl -fsSL -o "$TMPDIR/$ARTIFACT" "$URL"
 
 chmod +x "$TMPDIR/$ARTIFACT"
 sudo mv "$TMPDIR/$ARTIFACT" "$INSTALL_DIR/srb"
