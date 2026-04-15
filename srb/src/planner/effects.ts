@@ -22,7 +22,7 @@ import {
 export function sinkDataChanged(desired: SinkConfig, live: SinkConfig): boolean {
   return (
     desired.sourceTable !== live.sourceTable ||
-    desired.destination !== live.destination ||
+    JSON.stringify(desired.destination) !== JSON.stringify(live.destination) ||
     desired.filters !== live.filters ||
     desired.transformId !== live.transformId ||
     JSON.stringify([...desired.enrichmentIds].sort()) !==

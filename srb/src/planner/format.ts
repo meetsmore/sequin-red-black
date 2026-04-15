@@ -275,7 +275,7 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
       diffLines.push(dim("  Config (new):"));
       diffLines.push(formatNewResource("sink", desired.name, [
         ["sourceTable", desired.sink.sourceTable],
-        ["destination", desired.sink.destination],
+        ["destination", JSON.stringify(desired.sink.destination)],
         ["batchSize", String(desired.sink.batchSize)],
       ], "    "));
       diffLines.push(formatNewResource("index", desired.name, [
@@ -291,7 +291,7 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
       for (const wh of desired.webhooks) {
         diffLines.push(formatNewResource(`webhook sink (${wh.name})`, wh.name, [
           ["sourceTable", wh.sink.sourceTable],
-          ["destination", wh.sink.destination],
+          ["destination", JSON.stringify(wh.sink.destination)],
         ], "    "));
         diffLines.push(formatNewResource(`webhook transform (${wh.name})`, wh.transform.name, [
           ["functionBody", wh.transform.functionBody],

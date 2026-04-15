@@ -15,6 +15,7 @@ interface SinkYamlEntry {
   destination: Record<string, unknown>;
   transform: string;
   enrichment: string;
+  [key: string]: unknown;
 }
 
 /**
@@ -81,11 +82,8 @@ export function generateSequinYaml(
       message_grouping: true,
       load_shedding_policy: "pause_on_full",
       destination: {
-        type: "elasticsearch",
-        endpoint_url: cfg.sink.destination,
+        ...cfg.sink.destination,
         index_name: coloredIndexName,
-        auth_type: "none",
-        batch_size: 100,
       },
       transform: transformName,
       enrichment: enrichmentName,
@@ -126,9 +124,7 @@ export function generateSequinYaml(
         message_grouping: true,
         load_shedding_policy: "pause_on_full",
         destination: {
-          type: "webhook",
-          batch: false,
-          http_endpoint: wh.httpEndpoint,
+          ...wh.sink.destination,
           http_endpoint_path: colorizeWebhookPath(wh.httpEndpointPath, plan.pipeline, plan.targetColor),
         },
         transform: whTransformName,

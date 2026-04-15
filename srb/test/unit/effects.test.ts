@@ -35,7 +35,7 @@ function fixtureSink(overrides?: Partial<SinkConfig>): SinkConfig {
     name: "jobs_red",
     database: "source-db",
     sourceTable: "public.Job",
-    destination: "opensearch://localhost:9200/jobs_red",
+    destination: { type: "elasticsearch", endpoint_url: "opensearch://localhost:9200/jobs_red", auth_type: "none" },
     filters: "showInKanban = true",
     batchSize: 100,
     transformId: "transform-jobs-red",
@@ -114,7 +114,7 @@ function fixtureWebhookSink(overrides?: Partial<SinkConfig>): SinkConfig {
     name: "address_to_jobs_red",
     database: "source-db",
     sourceTable: "public.Address",
-    destination: "/jobs/_update_by_query?conflicts=proceed&wait_for_completion=false",
+    destination: { type: "webhook", http_endpoint: "opensearch-update-by-query", http_endpoint_path: "/jobs/_update_by_query?conflicts=proceed&wait_for_completion=false" },
     filters: "",
     batchSize: 1,
     transformId: "transform-addr-to-jobs-red",
@@ -208,7 +208,7 @@ describe("sinkDataChanged", () => {
   });
 
   test("detects destination change", () => {
-    const desired = fixtureSink({ destination: "opensearch://localhost:9200/jobs_black" });
+    const desired = fixtureSink({ destination: { type: "elasticsearch", endpoint_url: "opensearch://localhost:9200/jobs_black", auth_type: "none" } });
     const live = fixtureSink();
     expect(sinkDataChanged(desired, live)).toBe(true);
   });

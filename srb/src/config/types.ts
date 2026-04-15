@@ -7,7 +7,8 @@ export interface SinkConfig {
   /** @example "meetsone-db" */
   database: string;
   sourceTable: string;
-  destination: string;
+  /** Full destination config from sink.yaml (type, endpoint_url, auth_type, etc.) */
+  destination: Record<string, unknown>;
   filters: string;
   batchSize: number;
   transformId: string;

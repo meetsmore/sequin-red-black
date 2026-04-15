@@ -127,7 +127,7 @@ export async function discoverLiveState(
         name: pipeline, // base name for comparison
         database: (s.database as string) ?? "",
         sourceTable,
-        destination: (dest?.endpoint_url as string) ?? "",
+        destination: (dest as Record<string, unknown>) ?? {},
         filters: "",
         batchSize: (s.batch_size as number) ?? 1000,
         transformId: baseTransformId, // base name for comparison
@@ -255,7 +255,7 @@ export async function discoverLiveState(
             name: whCfg.name,
             database: (s.database as string) ?? "",
             sourceTable: (s.table as string) ?? "",
-            destination: baseHttpEndpointPath,
+            destination: (whDest as Record<string, unknown>) ?? {},
             filters: "",
             batchSize: (s.batch_size as number) ?? 1,
             transformId: baseTransformId,
