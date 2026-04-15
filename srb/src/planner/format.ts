@@ -248,10 +248,11 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
     return `${green("No changes.")} Infrastructure is up to date.`;
   }
 
-  const sections: string[] = [];
+  const diffSections: string[] = [];
+  const effectSections: string[] = [];
 
   for (const plan of plans) {
-    const lines: string[] = [];
+    const diffLines: string[] = [];
     const kind = pipelineChangeKind(plan.pipeline, ctx.desired, ctx.live);
     const desired = ctx.desired.get(plan.pipeline);
 
@@ -261,41 +262,41 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
 
     // Header
     const strategy = strategyLabel(kind as "create" | "update", desired!, live);
-    lines.push(bold(`Pipeline: ${cyan(plan.pipeline)}`));
-    lines.push(`  Strategy: ${strategy}`);
-    lines.push(`  Target color: ${bold(plan.targetColor)}`);
+    diffLines.push(bold(`Pipeline: ${cyan(plan.pipeline)}`));
+    diffLines.push(`  Strategy: ${strategy}`);
+    diffLines.push(`  Target color: ${bold(plan.targetColor)}`);
     if (liveColor) {
-      lines.push(`  Current color: ${bold(liveColor)}`);
+      diffLines.push(`  Current color: ${bold(liveColor)}`);
     }
 
     // Config diff section
     if (kind === "create" && desired) {
-      lines.push("");
-      lines.push(dim("  Config (new):"));
-      lines.push(formatNewResource("sink", desired.name, [
+      diffLines.push("");
+      diffLines.push(dim("  Config (new):"));
+      diffLines.push(formatNewResource("sink", desired.name, [
         ["sourceTable", desired.sink.sourceTable],
         ["destination", desired.sink.destination],
         ["batchSize", String(desired.sink.batchSize)],
       ], "    "));
-      lines.push(formatNewResource("index", desired.name, [
+      diffLines.push(formatNewResource("index", desired.name, [
         ["mappings", JSON.stringify(desired.index.mappings, null, 2)],
         ["settings", JSON.stringify(desired.index.settings, null, 2)],
       ], "    "));
-      lines.push(formatNewResource("transform", desired.transform.name, [
+      diffLines.push(formatNewResource("transform", desired.transform.name, [
         ["functionBody", desired.transform.functionBody],
       ], "    "));
-      lines.push(formatNewResource("enrichment", desired.enrichment.name, [
+      diffLines.push(formatNewResource("enrichment", desired.enrichment.name, [
         ["source", desired.enrichment.source],
       ], "    "));
       for (const wh of desired.webhooks) {
-        lines.push(formatNewResource(`webhook sink (${wh.name})`, wh.name, [
+        diffLines.push(formatNewResource(`webhook sink (${wh.name})`, wh.name, [
           ["sourceTable", wh.sink.sourceTable],
           ["destination", wh.sink.destination],
         ], "    "));
-        lines.push(formatNewResource(`webhook transform (${wh.name})`, wh.transform.name, [
+        diffLines.push(formatNewResource(`webhook transform (${wh.name})`, wh.transform.name, [
           ["functionBody", wh.transform.functionBody],
         ], "    "));
-        lines.push(formatNewResource(`webhook enrichment (${wh.name})`, wh.enrichment.name, [
+        diffLines.push(formatNewResource(`webhook enrichment (${wh.name})`, wh.enrichment.name, [
           ["source", wh.enrichment.source],
         ], "    "));
       }
@@ -308,25 +309,26 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
       const ed = diffEnrichmentResource(desired, live, indent); if (ed) resourceDiffs.push(ed);
 
       if (resourceDiffs.length > 0) {
-        lines.push("");
-        lines.push(dim("  Changes:"));
+        diffLines.push("");
+        diffLines.push(dim("  Changes:"));
         for (const rd of resourceDiffs) {
-          lines.push(`${indent}${yellow("~")} ${bold(rd.resourceType)} ${cyan(`"${rd.resourceName}"`)}`);
+          diffLines.push(`${indent}${yellow("~")} ${bold(rd.resourceType)} ${cyan(`"${rd.resourceName}"`)}`);
           for (const fd of rd.fieldDiffs) {
-            lines.push(fd.diffText);
+            diffLines.push(fd.diffText);
           }
         }
       }
     }
 
-    // Effects section
-    lines.push("");
-    lines.push(dim("  Effects:"));
-    for (const pe of plan.effects) {
-      lines.push(`    ${formatEffect(pe.effect, plan.pipeline, plan.targetColor)}`);
-    }
+    diffSections.push(diffLines.join("\n"));
 
-    sections.push(lines.join("\n"));
+    // Collect effects separately
+    const effectLines: string[] = [];
+    effectLines.push(`  ${bold(cyan(plan.pipeline))} → ${bold(plan.targetColor)}`);
+    for (const pe of plan.effects) {
+      effectLines.push(`    ${formatEffect(pe.effect, plan.pipeline, plan.targetColor)}`);
+    }
+    effectSections.push(effectLines.join("\n"));
   }
 
   // Summary
@@ -334,11 +336,21 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
   const creates = plans.filter(p => pipelineChangeKind(p.pipeline, ctx.desired, ctx.live) === "create").length;
   const updates = plans.length - creates;
 
-  const summary: string[] = [];
-  summary.push("");
-  summary.push(bold("Plan:") + ` ${plans.length} pipeline(s), ${totalEffects} effect(s)`);
-  if (creates > 0) summary.push(`  ${green("+")} ${creates} to create`);
-  if (updates > 0) summary.push(`  ${yellow("~")} ${updates} to update`);
+  const output: string[] = [];
 
-  return sections.join("\n\n") + "\n" + summary.join("\n");
+  // All diffs first
+  output.push(diffSections.join("\n\n"));
+
+  // Then all effects together
+  output.push("");
+  output.push(bold("Effects:"));
+  output.push(effectSections.join("\n"));
+
+  // Summary
+  output.push("");
+  output.push(bold("Plan:") + ` ${plans.length} pipeline(s), ${totalEffects} effect(s)`);
+  if (creates > 0) output.push(`  ${green("+")} ${creates} to create`);
+  if (updates > 0) output.push(`  ${yellow("~")} ${updates} to update`);
+
+  return output.join("\n");
 }
