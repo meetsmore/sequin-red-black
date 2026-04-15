@@ -37,4 +37,4 @@ else
 fi
 
 echo "Installed srb to $INSTALL_DIR/srb"
-srb --version
+"$INSTALL_DIR/srb" --version
