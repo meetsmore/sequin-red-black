@@ -9,17 +9,11 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
 
   if (opts.nukeSequin) {
-    console.log("Nuke: deleting all existing Sequin sinks...");
-    const sinks = await sequinApi.listSinks();
-    for (const sink of sinks) {
-      console.log(`  Deleting sink: ${sink.name} (${sink.id})`);
-      await sequinApi.deleteSink(sink.id);
-    }
-    if (sinks.length > 0) {
-      console.log(`  Deleted ${sinks.length} sink(s)\n`);
-    } else {
-      console.log("  No sinks to delete\n");
-    }
+    console.log("Nuke: applying empty config to delete all Sequin resources...");
+    const emptyYaml = "/tmp/srb-nuke-empty.yaml";
+    await Bun.write(emptyYaml, "---\n");
+    await sequinCli.apply(emptyYaml);
+    console.log("Nuke: done\n");
   }
 
   const desired = await loadCompiled(opts.compiled);
