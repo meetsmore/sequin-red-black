@@ -33,15 +33,22 @@ export function pipelineChangeKind(
   return "no_change";
 }
 
-/** Pick an available color for a pipeline — first color with no live entry and not occupied by foreign OS index */
+/** Pick an available color for a pipeline — tries preferred color first, then first available */
 export function pickTargetColor(
   pipeline: string,
   live: Map<PipelineKey, LivePipelineState>,
   occupiedColors?: Map<string, Set<Color>>,
+  preferredColor?: Color,
 ): Color {
   const occupied = occupiedColors?.get(pipeline);
+  const isAvailable = (c: Color) =>
+    !live.has(pipelineKey(pipeline, c)) && !occupied?.has(c);
+
+  if (preferredColor && isAvailable(preferredColor)) {
+    return preferredColor;
+  }
   for (const c of ALL_COLORS) {
-    if (!live.has(pipelineKey(pipeline, c)) && !occupied?.has(c)) {
+    if (isAvailable(c)) {
       return c;
     }
   }
@@ -68,10 +75,12 @@ export function generatePlans(
   }
 
   const plans: Plan[] = [];
+  let preferredColor: Color | undefined;
 
   for (const pipeline of pipelineNames) {
     const kind = pipelineChangeKind(pipeline, desired, live);
-    const targetColor = pickTargetColor(pipeline, live, occupiedColors);
+    const targetColor = pickTargetColor(pipeline, live, occupiedColors, preferredColor);
+    if (!preferredColor) preferredColor = targetColor;
 
     let effects: Plan["effects"] = [];
 
