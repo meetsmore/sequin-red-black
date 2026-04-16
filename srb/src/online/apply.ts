@@ -9,21 +9,16 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
 
   if (opts.nukeSequin) {
-    console.log("Nuke: deleting all Sequin sinks...");
+    console.log("Nuke: deleting all Sequin sinks via API...");
     const sinks = await sequinApi.listSinks();
     for (const sink of sinks) {
       console.log(`  Deleting sink: ${sink.name} (${sink.id})`);
       await sequinApi.deleteSink(sink.id);
     }
     console.log(`  ${sinks.length} sink(s) deleted`);
-
-    console.log("Nuke: deleting all Sequin functions...");
-    const functions = await sequinApi.listFunctions();
-    for (const fn of functions) {
-      console.log(`  Deleting function: ${fn.name} (${fn.id})`);
-      await sequinApi.deleteFunction(fn.id);
-    }
-    console.log(`  ${functions.length} function(s) deleted\n`);
+    // Note: orphaned functions (transforms/enrichments) cannot be deleted via API
+    // or CLI. They are harmless and will be reused or replaced on next apply.
+    console.log("Nuke: done\n");
   }
 
   const desired = await loadCompiled(opts.compiled);
