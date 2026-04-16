@@ -1282,4 +1282,164 @@ module commands_test {
         os_indices' = os_indices,
       })
   }
+
+  // ---------------------------------------------------------------------------
+  // OS indices tests — pick_target_color avoidance + drop + migration scenarios
+  // ---------------------------------------------------------------------------
+
+  // Test: pick_target_color avoids colors in os_indices
+  run test_pick_target_color_skips_os_indices = {
+    val live: (PipelineName, Color) -> LivePipelineState = Map()
+    val os: Set[(PipelineName, Color)] = Set(("jobs", Red))
+    val color = pick_target_color("jobs", live, os, ALL_COLORS)
+    assert(color != Red)
+  }
+
+  // Test: pick_target_color avoids colors in both live and os_indices
+  run test_pick_target_color_skips_both_live_and_os = {
+    val live: (PipelineName, Color) -> LivePipelineState = Map(("jobs", Red) -> fixture_live_state)
+    val os: Set[(PipelineName, Color)] = Set(("jobs", Black))
+    val color = pick_target_color("jobs", live, os, ALL_COLORS)
+    assert(color != Red and color != Black)
+  }
+
+  // Test: cmd_drop removes a foreign OS index
+  run test_drop_foreign_os_index = {
+    init
+      .then(discover_os_index("jobs", Red))
+      .then(all {
+        assert(("jobs", Red).in(os_indices)),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+      .then(cmd_drop("jobs", Red))
+      .then(all {
+        // OS index removed
+        assert(not(("jobs", Red).in(os_indices))),
+        // live_pipelines unaffected
+        assert(live_pipelines.keys().size() == 0),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+  }
+
+  // Scenario: migrate from pgsync — foreign OS index at red, srb picks different color
+  run test_e2e_migration_from_pgsync = {
+    init
+      // Simulate existing pgsync state: jobs_red index exists, alias jobs -> red
+      .then(discover_os_index("jobs", Red))
+      .then(discover_alias("jobs", Red))
+      // Load desired config
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      // Plan: should create, targeting a color OTHER than red
+      .then(cmd_plan)
+      .then(all {
+        assert(current_plans.size() == 1),
+        // Target color must not be Red (occupied by pgsync)
+        assert(current_plans.forall(p => p.target_color != Red)),
+        // Should still be a Create plan with 5 effects
+        assert(current_plans.forall(p => p.effects.length() == 5)),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+      // Apply: creates new color (not red)
+      .then(cmd_apply(false))
+      .then(
+        val managed_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        all {
+          // Exactly one Sequin-managed color
+          assert(managed_colors.size() == 1),
+          // That color is NOT red
+          assert(managed_colors.forall(c => c != Red)),
+          // OS index still exists at red
+          assert(("jobs", Red).in(os_indices)),
+          // Alias still points to red (haven't activated yet)
+          assert(aliases.get("jobs") == Red),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+          os_indices' = os_indices,
+        }
+      )
+      // Backfill the new color
+      .then(
+        val new_color = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+        backfill_completes("jobs", new_color)
+      )
+      // Activate: swap alias from red (pgsync) to new color (Sequin)
+      .then(
+        val new_color = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+        cmd_activate("jobs", new_color)
+      )
+      .then(
+        val new_color = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys())).fold(Red, (a, c) => c)
+        all {
+          // Alias now points to Sequin-managed color
+          assert(aliases.get("jobs") == new_color),
+          assert(new_color != Red),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+          os_indices' = os_indices,
+        }
+      )
+      // Drop the old pgsync index
+      .then(cmd_drop("jobs", Red))
+      .then(all {
+        // Foreign index gone
+        assert(not(("jobs", Red).in(os_indices))),
+        // Sequin-managed color still exists
+        assert(live_pipelines.keys().size() == 1),
+        // Alias still valid
+        assert("jobs".in(aliases.keys())),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+  }
+
+  // Scenario: multiple pipelines migrating from pgsync, different colors occupied
+  run test_e2e_migration_multi_pipeline = {
+    init
+      // jobs at red, clients at red (both pgsync)
+      .then(discover_os_index("jobs", Red))
+      .then(discover_os_index("clients", Red))
+      .then(discover_alias("jobs", Red))
+      .then(discover_alias("clients", Red))
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(load_desired_config("clients", fixture_clients_config))
+      .then(cmd_apply(false))
+      .then(
+        val jobs_managed = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val clients_managed = ALL_COLORS.filter(c => ("clients", c).in(live_pipelines.keys()))
+        all {
+          // Both got new colors, neither is red
+          assert(jobs_managed.size() == 1),
+          assert(clients_managed.size() == 1),
+          assert(jobs_managed.forall(c => c != Red)),
+          assert(clients_managed.forall(c => c != Red)),
+          // OS indices still at red
+          assert(("jobs", Red).in(os_indices)),
+          assert(("clients", Red).in(os_indices)),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+          os_indices' = os_indices,
+        }
+      )
+  }
 }
