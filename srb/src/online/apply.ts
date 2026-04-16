@@ -8,8 +8,8 @@ import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
 export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolean; autoApprove?: boolean }): Promise<void> {
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
   const desired = await loadCompiled(opts.compiled);
-  const liveState = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
-  const plans = generatePlans(desired, liveState.pipelines, ALL_COLORS, liveState.aliases);
+  const { pipelines: live, aliases, occupiedColors } = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
+  const plans = generatePlans(desired, live, ALL_COLORS, aliases, occupiedColors);
 
   if (plans.length === 0) {
     console.log("No changes. Infrastructure is up to date.");
@@ -17,7 +17,7 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
   }
 
   // Print plan
-  console.log(formatPlans(plans, { desired, live: liveState.pipelines }));
+  console.log(formatPlans(plans, { desired, live }));
 
   // Confirm unless auto-approve
   if (!opts.autoApprove) {

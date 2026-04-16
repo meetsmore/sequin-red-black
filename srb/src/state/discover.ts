@@ -20,10 +20,12 @@ import type { OpenSearchClient } from "../opensearch/client.js";
 export interface LiveState {
   pipelines: Map<PipelineKey, LivePipelineState>;
   aliases: Map<string, Color>;
+  /** Foreign OS indices not managed by Sequin — (pipeline → set of occupied colors) */
+  occupiedColors: Map<string, Set<Color>>;
 }
 
 /** Parse "<pipeline>_<color>" naming convention. Returns null if name doesn't match. */
-function parseColoredName(name: string): { pipeline: string; color: Color } | null {
+export function parseColoredName(name: string): { pipeline: string; color: Color } | null {
   const lastUnderscore = name.lastIndexOf("_");
   if (lastUnderscore < 0) return null;
   const pipeline = name.slice(0, lastUnderscore);
@@ -31,6 +33,29 @@ function parseColoredName(name: string): { pipeline: string; color: Color } | nu
   const color = colorFromString(colorStr);
   if (!color) return null;
   return { pipeline, color };
+}
+
+/**
+ * Find OpenSearch indices that match the {pipeline}_{color} pattern but are NOT
+ * managed by Sequin. These are "foreign" indices (e.g. from pgsync) that occupy
+ * a color slot.
+ */
+export function findOccupiedOsColors(
+  osIndices: { name: string; health: string; docCount: number }[],
+  managedKeys: Set<string>,
+): Map<string, Set<Color>> {
+  const occupied = new Map<string, Set<Color>>();
+  for (const idx of osIndices) {
+    const parsed = parseColoredName(idx.name);
+    if (!parsed) continue;
+    const key = `${parsed.pipeline}:${parsed.color}`;
+    if (managedKeys.has(key)) continue;
+    if (!occupied.has(parsed.pipeline)) {
+      occupied.set(parsed.pipeline, new Set());
+    }
+    occupied.get(parsed.pipeline)!.add(parsed.color);
+  }
+  return occupied;
 }
 
 /**
@@ -309,5 +334,18 @@ export async function discoverLiveState(
   });
   await Promise.all(aliasPromises);
 
-  return { pipelines, aliases };
+  // Discover foreign OS indices (exist in OpenSearch but not managed by Sequin)
+  const managedKeys = new Set(Array.from(pipelines.keys()));
+  const occupiedColors = findOccupiedOsColors(osIndices, managedKeys);
+
+  // Warn about unmanaged indices
+  for (const [pipeline, colors] of occupiedColors) {
+    for (const color of colors) {
+      const isActive = aliases.get(pipeline) === color;
+      const suffix = isActive ? " (active via alias)" : "";
+      console.warn(`⚠ ${pipeline}_${color} exists in OpenSearch but is not managed by Sequin${suffix}`);
+    }
+  }
+
+  return { pipelines, aliases, occupiedColors };
 }
