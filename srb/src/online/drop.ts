@@ -11,18 +11,27 @@ export async function dropCommand(pipeline: string, colorStr: string, opts: Onli
 
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
   const liveState = await discoverLiveState(sequinCli, sequinApi, openSearch);
-  const key = pipelineKey(pipeline, color);
-  const live = liveState.pipelines.get(key);
-
-  if (!live) { console.error(`No live variant for ${pipeline}:${color}`); process.exit(1); }
 
   // Cannot drop active color
   const activeColor = liveState.aliases.get(pipeline);
   if (activeColor === color) { console.error(`Cannot drop ${pipeline}:${color} — it is the active color`); process.exit(1); }
 
-  const effects = effectsForDeleteColor(pipeline, live, color);
-  const plan = { pipeline, targetColor: color, effects };
+  const key = pipelineKey(pipeline, color);
+  const live = liveState.pipelines.get(key);
 
-  await execute([plan], new Map(), { sequinCli, sequinApi, openSearch, skipBackfill: false, dryRun: false });
+  if (live) {
+    // Sequin-managed variant: delete sink + transform + enrichment + index
+    const effects = effectsForDeleteColor(pipeline, live, color);
+    const plan = { pipeline, targetColor: color, effects };
+    await execute([plan], new Map(), { sequinCli, sequinApi, openSearch, skipBackfill: false, dryRun: false });
+  } else {
+    // Foreign OS index (e.g. pgsync legacy): delete just the OpenSearch index
+    const isForeign = liveState.occupiedColors.get(pipeline)?.has(color);
+    if (!isForeign) { console.error(`No live variant for ${pipeline}:${color}`); process.exit(1); }
+    const indexName = `${pipeline}_${color}`;
+    console.log(`Deleting foreign OpenSearch index: ${indexName}`);
+    await openSearch.deleteIndex(indexName);
+  }
+
   console.log(`Dropped ${pipeline}:${color}`);
 }
