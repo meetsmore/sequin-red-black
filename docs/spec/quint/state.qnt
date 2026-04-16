@@ -94,6 +94,8 @@ module state {
 
   // Models discovering a foreign OS index (exists in OpenSearch but not managed by Sequin)
   action discover_os_index(pipeline: PipelineName, color: Color): bool = all {
+    // Precondition: cannot discover an OS index at a color already managed by Sequin
+    not((pipeline, color).in(live_pipelines.keys())),
     os_indices' = os_indices.union(Set((pipeline, color))),
     desired_pipelines' = desired_pipelines,
     live_pipelines' = live_pipelines,

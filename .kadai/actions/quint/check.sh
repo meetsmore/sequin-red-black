@@ -18,7 +18,7 @@ quint test "$TEST" --main=commands_test --match=test_
 
 echo ""
 echo "=== Invariants (SATISFIED = good) ==="
-for inv in never_drop_active alias_integrity no_partial_pipelines disabled_not_backfilling; do
+for inv in never_drop_active alias_integrity no_partial_pipelines disabled_not_backfilling os_live_disjoint; do
   printf "%-30s " "$inv"
   output=$(quint run "$SPEC" --main=commands --invariant="$inv" --max-steps=50 --max-samples=100 2>&1)
   if echo "$output" | grep -q "No violation found"; then

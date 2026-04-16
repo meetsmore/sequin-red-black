@@ -290,6 +290,8 @@ module commands {
     os_indices.forall(k => not(k.in(live_pipelines.keys())))
 
   // 6. Plans never target a color occupied by a foreign OS index
+  // Note: not model-checked via `step` because discovery and planning can interleave
+  // in the nondeterministic model. Verified by unit tests and enforced by pick_target_color.
   val never_target_occupied_os_color: bool =
     current_plans.forall(p =>
       not((p.pipeline, p.target_color).in(os_indices))
