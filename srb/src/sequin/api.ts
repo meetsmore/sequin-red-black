@@ -41,4 +41,15 @@ export class SequinAPI {
   async triggerBackfill(sinkId: string): Promise<void> {
     await this.fetch(`/api/sinks/${sinkId}/backfills`, { method: "POST", body: "{}" });
   }
+
+  /** List all functions (transforms + enrichments). Returns array of {id, name, ...}. */
+  async listFunctions(): Promise<{ id: string; name: string }[]> {
+    const res = await this.fetch("/api/functions");
+    const data = (await res.json()) as { data: { id: string; name: string }[] };
+    return data.data;
+  }
+
+  async deleteFunction(functionId: string): Promise<void> {
+    await this.fetch(`/api/functions/${functionId}`, { method: "DELETE" });
+  }
 }
