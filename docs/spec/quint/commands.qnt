@@ -15,10 +15,11 @@ module commands {
     // Precondition: there is desired config loaded
     desired_pipelines.keys().size() > 0,
     // Generate plans for all changed pipelines
-    current_plans' = generate_plans(desired_pipelines, live_pipelines, ALL_COLORS),
+    current_plans' = generate_plans(desired_pipelines, live_pipelines, ALL_COLORS, os_indices),
     desired_pipelines' = desired_pipelines,
     live_pipelines' = live_pipelines,
     aliases' = aliases,
+    os_indices' = os_indices,
   }
 
   // ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ module commands {
     // Generate fresh plans (apply = plan + execute)
     // TriggerBackfill effects are always in the plan (for user visibility),
     // but when skip_backfill is true, the sink starts without backfilling
-    val plans = generate_plans(desired_pipelines, live_pipelines, ALL_COLORS)
+    val plans = generate_plans(desired_pipelines, live_pipelines, ALL_COLORS, os_indices)
     // For simplicity in the spec, we model apply as creating all target pipelines at once
     val new_live = plans.fold(live_pipelines, (acc, p) =>
       if (p.effects.length() == 0 or not(p.pipeline.in(desired_pipelines.keys()))) acc
@@ -83,6 +84,7 @@ module commands {
       desired_pipelines' = desired_pipelines,
       aliases' = aliases,
       current_plans' = plans,
+      os_indices' = os_indices,
     }
   }
 
@@ -105,6 +107,7 @@ module commands {
     desired_pipelines' = desired_pipelines,
     aliases' = aliases,
     current_plans' = current_plans,
+    os_indices' = os_indices,
   }
 
   // ---------------------------------------------------------------------------
@@ -124,6 +127,7 @@ module commands {
     desired_pipelines' = desired_pipelines,
     live_pipelines' = live_pipelines,
     current_plans' = current_plans,
+    os_indices' = os_indices,
   }
 
   // ---------------------------------------------------------------------------
@@ -132,13 +136,13 @@ module commands {
   // ---------------------------------------------------------------------------
 
   action cmd_drop(pipeline: PipelineName, color: Color): bool = all {
-    // Precondition: the colored variant exists
-    (pipeline, color).in(live_pipelines.keys()),
-    // Precondition: not dropping the active color
-    if (pipeline.in(aliases.keys())) aliases.get(pipeline) != color
-    else true,
-    // Remove the colored variant by rebuilding the map without it
+    // Precondition: color exists in EITHER live_pipelines or os_indices
+    or { (pipeline, color).in(live_pipelines.keys()), (pipeline, color).in(os_indices) },
+    // Precondition: not dropping the active color (applies to both managed and foreign)
+    if (pipeline.in(aliases.keys())) aliases.get(pipeline) != color else true,
+    // Remove from whichever set it belongs to
     live_pipelines' = live_pipelines.keys().exclude(Set((pipeline, color))).mapBy(k => live_pipelines.get(k)),
+    os_indices' = os_indices.exclude(Set((pipeline, color))),
     desired_pipelines' = desired_pipelines,
     aliases' = aliases,
     current_plans' = current_plans,
@@ -159,6 +163,7 @@ module commands {
     desired_pipelines' = desired_pipelines,
     aliases' = aliases,
     current_plans' = current_plans,
+    os_indices' = os_indices,
   }
 
   // ---------------------------------------------------------------------------
@@ -176,6 +181,7 @@ module commands {
     desired_pipelines' = desired_pipelines,
     aliases' = aliases,
     current_plans' = current_plans,
+    os_indices' = os_indices,
   }
 
   // ---------------------------------------------------------------------------
@@ -219,6 +225,12 @@ module commands {
       nondet p = desired_pipelines.keys().oneOf()
       nondet c = ALL_COLORS.oneOf()
       reindex_completes(p, c),
+    },
+    // Model discovering a foreign OS index
+    all {
+      nondet p = Set("jobs", "clients", "users").oneOf()
+      nondet c = ALL_COLORS.oneOf()
+      discover_os_index(p, c),
     },
     // Model loading a config (needed to bootstrap the spec for model checking)
     nondet name = Set("jobs", "clients", "users").oneOf()
@@ -271,6 +283,16 @@ module commands {
     live_pipelines.keys().forall(k =>
       val lp = live_pipelines.get(k)
       lp.sink.lifecycle == SinkDisabled implies not(lp.sink.backfilling)
+    )
+
+  // 5. Foreign OS indices and Sequin-managed pipelines never overlap
+  val os_live_disjoint: bool =
+    os_indices.forall(k => not(k.in(live_pipelines.keys())))
+
+  // 6. Plans never target a color occupied by a foreign OS index
+  val never_target_occupied_os_color: bool =
+    current_plans.forall(p =>
+      not((p.pipeline, p.target_color).in(os_indices))
     )
 
   // ---------------------------------------------------------------------------

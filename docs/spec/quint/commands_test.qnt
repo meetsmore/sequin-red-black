@@ -309,7 +309,7 @@ module commands_test {
   run test_generate_plans_new_pipeline = {
     val desired: PipelineName -> PipelineConfig = Map("jobs" -> fixture_pipeline_config)
     val live: (PipelineName, Color) -> LivePipelineState = Map()
-    val plans = generate_plans(desired, live, ALL_COLORS)
+    val plans = generate_plans(desired, live, ALL_COLORS, Set())
     assert(plans.size() == 1)
   }
 
@@ -317,7 +317,7 @@ module commands_test {
   run test_generate_plans_no_changes = {
     val desired: PipelineName -> PipelineConfig = Map()
     val live: (PipelineName, Color) -> LivePipelineState = Map()
-    val plans = generate_plans(desired, live, ALL_COLORS)
+    val plans = generate_plans(desired, live, ALL_COLORS, Set())
     assert(plans.size() == 0)
   }
 
@@ -339,6 +339,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 
@@ -363,6 +364,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 
@@ -395,6 +397,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
       // Apply: creates resources and starts backfill
       .then(cmd_apply(false))
@@ -416,6 +419,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
       // Backfill completes
       .then(
@@ -430,6 +434,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
       // Activate: point alias to the new color
       .then(
@@ -449,6 +454,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -477,6 +483,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Complete backfills and activate independently
@@ -499,6 +506,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       .then(
@@ -517,6 +525,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 
@@ -564,6 +573,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Backfill the new color
@@ -592,6 +602,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Drop the old color
@@ -612,6 +623,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -655,6 +667,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
       // Apply
       .then(cmd_apply(false))
@@ -677,6 +690,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -722,6 +736,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Activate the new color
@@ -740,6 +755,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Drop old color
@@ -758,6 +774,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -801,6 +818,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
       // Apply: should update existing sink in place, no new color
       .then(cmd_apply(false))
@@ -820,6 +838,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -862,6 +881,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -893,6 +913,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 
@@ -942,6 +963,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -1000,6 +1022,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Now drop the bad color
@@ -1018,6 +1041,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
   }
@@ -1044,6 +1068,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // User can activate immediately (no backfill in progress)
@@ -1057,6 +1082,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 
@@ -1082,6 +1108,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Manually backfill jobs first
@@ -1100,6 +1127,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Jobs backfill completes
@@ -1120,6 +1148,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Clients backfill completes
@@ -1143,6 +1172,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 
@@ -1173,6 +1203,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Backfill completes, activate
@@ -1194,6 +1225,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Now update the transform (triggers new color with fresh backfill)
@@ -1219,6 +1251,7 @@ module commands_test {
           live_pipelines' = live_pipelines,
           aliases' = aliases,
           current_plans' = current_plans,
+          os_indices' = os_indices,
         }
       )
       // Complete backfill on new color, activate it, drop old
@@ -1246,6 +1279,7 @@ module commands_test {
         live_pipelines' = live_pipelines,
         aliases' = aliases,
         current_plans' = current_plans,
+        os_indices' = os_indices,
       })
   }
 }

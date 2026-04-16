@@ -20,6 +20,10 @@ module state {
   // The current set of plans (one per changed pipeline)
   var current_plans: Set[Plan]
 
+  // Foreign OpenSearch indices not managed by Sequin.
+  // Tracks (pipeline, color) pairs where an OS index exists without a Sequin sink.
+  var os_indices: Set[(PipelineName, Color)]
+
   // ---------------------------------------------------------------------------
   // Constants for model checking
   // ---------------------------------------------------------------------------
@@ -35,6 +39,7 @@ module state {
     live_pipelines' = Map(),
     aliases' = Map(),
     current_plans' = Set(),
+    os_indices' = Set(),
   }
 
   // ---------------------------------------------------------------------------
@@ -46,8 +51,12 @@ module state {
     ALL_COLORS.filter(c => live.keys().contains((pipeline, c)))
 
   // Get colors that have NO live resources for a pipeline (available for deployment)
-  pure def available_colors(pipeline: PipelineName, live: (PipelineName, Color) -> LivePipelineState): Set[Color] =
-    ALL_COLORS.filter(c => not(live.keys().contains((pipeline, c))))
+  pure def available_colors(
+    pipeline: PipelineName,
+    live: (PipelineName, Color) -> LivePipelineState,
+    os_indices: Set[(PipelineName, Color)]
+  ): Set[Color] =
+    ALL_COLORS.filter(c => not((pipeline, c).in(live.keys())) and not((pipeline, c).in(os_indices)))
 
   // Check if a pipeline has any live colored variants
   pure def pipeline_exists_live(pipeline: PipelineName, live: (PipelineName, Color) -> LivePipelineState): bool =
@@ -62,6 +71,7 @@ module state {
     live_pipelines' = live_pipelines,
     aliases' = aliases,
     current_plans' = current_plans,
+    os_indices' = os_indices,
   }
 
   // Models discovering live state from Sequin API + OpenSearch
@@ -70,6 +80,7 @@ module state {
     desired_pipelines' = desired_pipelines,
     aliases' = aliases,
     current_plans' = current_plans,
+    os_indices' = os_indices,
   }
 
   // Models discovering which color an alias points to
@@ -77,6 +88,16 @@ module state {
     aliases' = aliases.put(pipeline, color),
     desired_pipelines' = desired_pipelines,
     live_pipelines' = live_pipelines,
+    current_plans' = current_plans,
+    os_indices' = os_indices,
+  }
+
+  // Models discovering a foreign OS index (exists in OpenSearch but not managed by Sequin)
+  action discover_os_index(pipeline: PipelineName, color: Color): bool = all {
+    os_indices' = os_indices.union(Set((pipeline, color))),
+    desired_pipelines' = desired_pipelines,
+    live_pipelines' = live_pipelines,
+    aliases' = aliases,
     current_plans' = current_plans,
   }
 }
