@@ -5,8 +5,23 @@ import { execute } from "../executor/executor.js";
 import { ALL_COLORS } from "../config/types.js";
 import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
 
-export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolean; autoApprove?: boolean }): Promise<void> {
+export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolean; autoApprove?: boolean; nukeSequin?: boolean }): Promise<void> {
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
+
+  if (opts.nukeSequin) {
+    console.log("Nuke: deleting all existing Sequin sinks...");
+    const sinks = await sequinApi.listSinks();
+    for (const sink of sinks) {
+      console.log(`  Deleting sink: ${sink.name} (${sink.id})`);
+      await sequinApi.deleteSink(sink.id);
+    }
+    if (sinks.length > 0) {
+      console.log(`  Deleted ${sinks.length} sink(s)\n`);
+    } else {
+      console.log("  No sinks to delete\n");
+    }
+  }
+
   const desired = await loadCompiled(opts.compiled);
   const { pipelines: live, aliases, occupiedColors } = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
   const plans = generatePlans(desired, live, ALL_COLORS, aliases, occupiedColors);
