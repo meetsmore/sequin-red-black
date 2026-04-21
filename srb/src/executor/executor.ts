@@ -29,53 +29,6 @@ export function coloredEnrichmentName(pipeline: string, color: Color): string {
   return `${pipeline}_${color}-enrichment`;
 }
 
-// Classify effects by execution target
-type EffectCategory = "opensearch" | "sequin_declarative" | "sequin_delete" | "imperative";
-
-function categorize(effect: Effect): EffectCategory {
-  switch (effect.kind) {
-    case "CreateIndex":
-    case "DeleteIndex":
-    case "SwapAlias":
-    case "TriggerReindex":
-      return "opensearch";
-    case "CreateSink":
-    case "CreateTransform":
-    case "CreateEnrichment":
-    case "UpdateSink":
-      return "sequin_declarative";
-    case "DeleteSink":
-    case "DeleteTransform":
-    case "DeleteEnrichment":
-      return "sequin_delete";
-    case "TriggerBackfill":
-      return "imperative";
-  }
-}
-
-// Group consecutive sequin declarative effects into batches
-interface EffectBatch {
-  category: EffectCategory;
-  effects: PlannedEffect[];
-}
-
-function batchEffects(effects: PlannedEffect[]): EffectBatch[] {
-  const sorted = [...effects].sort((a, b) => a.order - b.order);
-  const batches: EffectBatch[] = [];
-
-  for (const pe of sorted) {
-    const cat = categorize(pe.effect);
-    const last = batches[batches.length - 1];
-    if (last && last.category === cat && cat === "sequin_declarative") {
-      // Merge consecutive sequin declarative effects
-      last.effects.push(pe);
-    } else {
-      batches.push({ category: cat, effects: [pe] });
-    }
-  }
-
-  return batches;
-}
 
 function log(msg: string): void {
   console.log(`[executor] ${msg}`);
@@ -89,45 +42,28 @@ async function executeOpenSearchEffect(
 ): Promise<void> {
   switch (effect.kind) {
     case "CreateIndex": {
-      // Stamp color into index name: "jobs" → "jobs_red"
       const name = coloredIndexName(plan.pipeline, plan.targetColor);
-      if (dryRun) {
-        log(`[dry-run] Would create index: ${name}`);
-        return;
-      }
+      if (dryRun) { log(`[dry-run] Would create index: ${name}`); return; }
       log(`Creating index: ${name}`);
-      await os.createIndex(name, {
-        mappings: effect.index.mappings,
-        settings: effect.index.settings,
-      });
+      await os.createIndex(name, { mappings: effect.index.mappings, settings: effect.index.settings });
       break;
     }
     case "DeleteIndex": {
-      if (dryRun) {
-        log(`[dry-run] Would delete index: ${effect.id}`);
-        return;
-      }
+      if (dryRun) { log(`[dry-run] Would delete index: ${effect.id}`); return; }
       log(`Deleting index: ${effect.id}`);
       await os.deleteIndex(effect.id);
       break;
     }
     case "SwapAlias": {
       const indexName = coloredIndexName(effect.pipeline, effect.color);
-      if (dryRun) {
-        log(`[dry-run] Would swap alias for ${effect.pipeline} -> ${indexName}`);
-        return;
-      }
+      if (dryRun) { log(`[dry-run] Would swap alias for ${effect.pipeline} -> ${indexName}`); return; }
       log(`Swapping alias for ${effect.pipeline} -> ${indexName}`);
-      // Look up current alias target so we can remove the old binding
       const currentTarget = await os.getAlias(effect.pipeline);
       await os.swapAlias(effect.pipeline, currentTarget, indexName);
       break;
     }
     case "TriggerReindex": {
-      if (dryRun) {
-        log(`[dry-run] Would reindex ${effect.source} -> ${effect.target}`);
-        return;
-      }
+      if (dryRun) { log(`[dry-run] Would reindex ${effect.source} -> ${effect.target}`); return; }
       log(`Triggering reindex: ${effect.source} -> ${effect.target}`);
       await os.triggerReindex(effect.source, effect.target);
       break;
@@ -137,25 +73,20 @@ async function executeOpenSearchEffect(
   }
 }
 
-async function executeSequinBatch(
-  plan: Plan,
-  batch: PlannedEffect[],
+async function executeSequinApplyBatch(
+  plansWithDeclarative: Plan[],
+  effectCount: number,
   desired: Map<string, PipelineConfig>,
   opts: ExecutorOptions,
 ): Promise<void> {
   if (opts.dryRun) {
-    for (const pe of batch) {
-      log(`[dry-run] Would apply sequin effect: ${pe.effect.kind}`);
-    }
+    log(`[dry-run] Would apply consolidated Sequin config for ${plansWithDeclarative.length} pipeline(s) (${effectCount} effects)`);
     return;
   }
-
-  // Generate YAML from the current plan and desired configs, then apply via CLI
-  const yaml = generateSequinYaml([plan], desired);
+  const yaml = generateSequinYaml(plansWithDeclarative, desired);
   const tmpFile = path.join(tmpdir(), `srb-sequin-${Date.now()}.yaml`);
-
   await fs.writeFile(tmpFile, yaml, "utf-8");
-  log(`Applying Sequin config from ${tmpFile} (${batch.length} effects)`);
+  log(`Applying consolidated Sequin config for ${plansWithDeclarative.length} pipeline(s) (${effectCount} effects): ${tmpFile}`);
   try {
     await opts.sequinCli.apply(tmpFile);
   } catch (err) {
@@ -172,21 +103,11 @@ async function executeSequinDelete(
   opts: ExecutorOptions,
 ): Promise<void> {
   if (effect.kind === "DeleteSink") {
-    // The effect ID is the Sequin UUID from live state discovery
-    if (opts.dryRun) {
-      log(`[dry-run] Would delete sink: ${effect.id}`);
-      return;
-    }
+    if (opts.dryRun) { log(`[dry-run] Would delete sink: ${effect.id}`); return; }
     log(`Deleting sink: ${coloredSinkName(plan.pipeline, plan.targetColor)} (${effect.id})`);
     await opts.sequinApi.deleteSink(effect.id);
   } else if (effect.kind === "DeleteTransform" || effect.kind === "DeleteEnrichment") {
-    // Transforms and enrichments are "functions" in Sequin — they get cleaned
-    // up automatically when the sink referencing them is deleted, or on next
-    // sequin config apply. Log but no direct API call needed.
-    if (opts.dryRun) {
-      log(`[dry-run] Would delete function: ${effect.id}`);
-      return;
-    }
+    if (opts.dryRun) { log(`[dry-run] Would delete function: ${effect.id}`); return; }
     log(`Function ${effect.id} will be cleaned up by Sequin`);
   }
 }
@@ -199,28 +120,37 @@ async function executeImperativeEffect(
   if (effect.kind !== "TriggerBackfill") {
     throw new Error(`Not an imperative effect: ${effect.kind}`);
   }
+  if (opts.skipBackfill) { log(`Skipping backfill for sink: ${effect.sinkId} (--skip-backfill)`); return; }
+  if (opts.dryRun) { log(`[dry-run] Would trigger backfill for sink: ${effect.sinkId}`); return; }
 
-  if (opts.skipBackfill) {
-    log(`Skipping backfill for sink: ${effect.sinkId} (--skip-backfill)`);
-    return;
-  }
-
-  if (opts.dryRun) {
-    log(`[dry-run] Would trigger backfill for sink: ${effect.sinkId}`);
-    return;
-  }
-
-  // Look up the actual sink ID by colored name — the effect stores the base
-  // ID from desired config, but the Sequin API needs the UUID
+  // Look up the actual sink UUID by colored name — the Sequin API needs the UUID
   const coloredName = coloredSinkName(plan.pipeline, plan.targetColor);
   const sinks = await opts.sequinApi.listSinks();
   const sink = sinks.find(s => s.name === coloredName);
   if (!sink) {
     throw new Error(`Cannot trigger backfill: sink "${coloredName}" not found in Sequin`);
   }
-
   log(`Triggering backfill for sink: ${coloredName} (${sink.id})`);
   await opts.sequinApi.triggerBackfill(sink.id);
+}
+
+type PhaseKind = "os_create" | "sequin_declarative" | "backfill" | "sequin_delete" | "os_mod";
+
+function phaseFor(effect: Effect): PhaseKind {
+  switch (effect.kind) {
+    case "CreateIndex": return "os_create";
+    case "CreateSink":
+    case "CreateTransform":
+    case "CreateEnrichment":
+    case "UpdateSink": return "sequin_declarative";
+    case "TriggerBackfill": return "backfill";
+    case "DeleteSink":
+    case "DeleteTransform":
+    case "DeleteEnrichment": return "sequin_delete";
+    case "SwapAlias":
+    case "DeleteIndex":
+    case "TriggerReindex": return "os_mod";
+  }
 }
 
 export async function execute(
@@ -231,34 +161,55 @@ export async function execute(
   for (const plan of plans) {
     if (plan.effects.length === 0) {
       log(`Pipeline ${plan.pipeline} (${plan.targetColor}): no changes`);
-      continue;
+    } else {
+      log(`Pipeline ${plan.pipeline} (${plan.targetColor}): ${plan.effects.length} effects`);
     }
+  }
 
-    log(`Pipeline ${plan.pipeline} (${plan.targetColor}): ${plan.effects.length} effects`);
+  // Collect effects by phase, preserving insertion order (plan-by-plan, effect-by-effect)
+  type Item = { plan: Plan; pe: PlannedEffect };
+  const byPhase: Record<PhaseKind, Item[]> = {
+    os_create: [],
+    sequin_declarative: [],
+    backfill: [],
+    sequin_delete: [],
+    os_mod: [],
+  };
+  for (const plan of plans) {
+    const sorted = [...plan.effects].sort((a, b) => a.order - b.order);
+    for (const pe of sorted) byPhase[phaseFor(pe.effect)].push({ plan, pe });
+  }
 
-    const batches = batchEffects(plan.effects);
+  // Phase 1: OS index creates (must exist before sinks reference them)
+  for (const { pe, plan } of byPhase.os_create) {
+    await executeOpenSearchEffect(pe.effect, opts.openSearch, plan, opts.dryRun);
+  }
 
-    for (const batch of batches) {
-      switch (batch.category) {
-        case "opensearch":
-          for (const pe of batch.effects) {
-            await executeOpenSearchEffect(pe.effect, opts.openSearch, plan, opts.dryRun);
-          }
-          break;
-        case "sequin_declarative":
-          await executeSequinBatch(plan, batch.effects, desired, opts);
-          break;
-        case "sequin_delete":
-          for (const pe of batch.effects) {
-            await executeSequinDelete(pe.effect, plan, opts);
-          }
-          break;
-        case "imperative":
-          for (const pe of batch.effects) {
-            await executeImperativeEffect(pe.effect, plan, opts);
-          }
-          break;
-      }
-    }
+  // Phase 2: one consolidated sequin config apply
+  if (byPhase.sequin_declarative.length > 0) {
+    const plansWithDeclarative = plans.filter(p =>
+      p.effects.some(e => phaseFor(e.effect) === "sequin_declarative"),
+    );
+    await executeSequinApplyBatch(
+      plansWithDeclarative,
+      byPhase.sequin_declarative.length,
+      desired,
+      opts,
+    );
+  }
+
+  // Phase 3: imperative backfills
+  for (const { pe, plan } of byPhase.backfill) {
+    await executeImperativeEffect(pe.effect, plan, opts);
+  }
+
+  // Phase 4: imperative sequin deletes (by UUID)
+  for (const { pe, plan } of byPhase.sequin_delete) {
+    await executeSequinDelete(pe.effect, plan, opts);
+  }
+
+  // Phase 5: OS alias swaps / index deletes / reindex
+  for (const { pe, plan } of byPhase.os_mod) {
+    await executeOpenSearchEffect(pe.effect, opts.openSearch, plan, opts.dryRun);
   }
 }
