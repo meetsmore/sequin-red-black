@@ -88,6 +88,19 @@ function planWithCreateAndBackfill(pipeline: string, color: "red" | "black"): Pl
   };
 }
 
+function planWithDrop(pipeline: string, color: "red" | "black"): Plan {
+  return {
+    pipeline,
+    targetColor: color,
+    effects: [
+      { effect: { kind: "DeleteSink", id: `sink-uuid-${pipeline}-${color}` }, status: "pending", dependsOn: [], order: 1 },
+      { effect: { kind: "DeleteTransform", id: `transform-uuid-${pipeline}-${color}` }, status: "pending", dependsOn: [1], order: 2 },
+      { effect: { kind: "DeleteEnrichment", id: `enrichment-uuid-${pipeline}-${color}` }, status: "pending", dependsOn: [1], order: 3 },
+      { effect: { kind: "DeleteIndex", id: `${pipeline}_${color}` }, status: "pending", dependsOn: [1, 2, 3], order: 4 },
+    ],
+  };
+}
+
 describe("executor", () => {
   test("empty plans list makes no calls", async () => {
     const log: CallLog = [];
@@ -169,5 +182,25 @@ describe("executor", () => {
     const backfillIdx = log.findIndex(l => l.startsWith("sequin.triggerBackfill:"));
     expect(applyIdx).toBeGreaterThanOrEqual(0);
     expect(backfillIdx).toBeGreaterThan(applyIdx);
+  });
+
+  test("drop flow: sink deleted before OS index, no sequin apply is triggered", async () => {
+    const log: CallLog = [];
+    const plans = [planWithDrop("jobs", "red")];
+
+    await execute(plans, new Map(), {
+      sequinCli: mockSequinCli(log),
+      sequinApi: mockSequinApi(log),
+      openSearch: mockOpenSearch(log),
+      skipBackfill: false,
+      dryRun: false,
+    });
+
+    const deleteSinkIdx = log.findIndex(l => l.startsWith("sequin.deleteSink:"));
+    const deleteIndexIdx = log.findIndex(l => l.startsWith("os.deleteIndex:"));
+    const applyCalled = log.some(l => l.startsWith("sequin.apply:"));
+    expect(deleteSinkIdx).toBeGreaterThanOrEqual(0);
+    expect(deleteIndexIdx).toBeGreaterThan(deleteSinkIdx);
+    expect(applyCalled).toBe(false);
   });
 });
