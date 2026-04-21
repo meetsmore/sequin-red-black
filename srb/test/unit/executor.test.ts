@@ -111,4 +111,23 @@ describe("executor", () => {
     expect(applies[0]).toContain("jobs_red");
     expect(applies[0]).toContain("clients_black");
   });
+
+  test("OS index creates run before the sequin apply", async () => {
+    const log: CallLog = [];
+    const desired = new Map<string, PipelineConfig>([["jobs", fixturePipelineConfig("jobs")]]);
+    const plans = [planWithCreate("jobs", "red")];
+
+    await execute(plans, desired, {
+      sequinCli: mockSequinCli(log),
+      sequinApi: mockSequinApi(log),
+      openSearch: mockOpenSearch(log),
+      skipBackfill: true,
+      dryRun: false,
+    });
+
+    const osIdx = log.findIndex(l => l.startsWith("os.createIndex:jobs_red"));
+    const applyIdx = log.findIndex(l => l.startsWith("sequin.apply:"));
+    expect(osIdx).toBeGreaterThanOrEqual(0);
+    expect(applyIdx).toBeGreaterThan(osIdx);
+  });
 });
