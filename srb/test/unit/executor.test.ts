@@ -73,6 +73,21 @@ function planWithCreate(pipeline: string, color: "red" | "black"): Plan {
   return { pipeline, targetColor: color, effects };
 }
 
+function planWithCreateAndBackfill(pipeline: string, color: "red" | "black"): Plan {
+  const cfg = fixturePipelineConfig(pipeline);
+  return {
+    pipeline,
+    targetColor: color,
+    effects: [
+      { effect: { kind: "CreateIndex", index: cfg.index }, status: "pending", dependsOn: [], order: 1 },
+      { effect: { kind: "CreateTransform", transform: cfg.transform }, status: "pending", dependsOn: [], order: 2 },
+      { effect: { kind: "CreateEnrichment", enrichment: cfg.enrichment }, status: "pending", dependsOn: [], order: 3 },
+      { effect: { kind: "CreateSink", sink: cfg.sink }, status: "pending", dependsOn: [1, 2, 3], order: 4 },
+      { effect: { kind: "TriggerBackfill", sinkId: cfg.sink.id }, status: "pending", dependsOn: [4], order: 5 },
+    ],
+  };
+}
+
 describe("executor", () => {
   test("empty plans list makes no calls", async () => {
     const log: CallLog = [];
@@ -129,5 +144,30 @@ describe("executor", () => {
     const applyIdx = log.findIndex(l => l.startsWith("sequin.apply:"));
     expect(osIdx).toBeGreaterThanOrEqual(0);
     expect(applyIdx).toBeGreaterThan(osIdx);
+  });
+
+  test("backfills run after the sequin apply", async () => {
+    const log: CallLog = [];
+    const desired = new Map<string, PipelineConfig>([["jobs", fixturePipelineConfig("jobs")]]);
+    const plans = [planWithCreateAndBackfill("jobs", "red")];
+
+    const sequinApi = {
+      async listSinks() { return [{ id: "sink-uuid-1", name: "jobs_red" }]; },
+      async deleteSink(id: string) { log.push(`sequin.deleteSink:${id}`); },
+      async triggerBackfill(id: string) { log.push(`sequin.triggerBackfill:${id}`); },
+    } as unknown as SequinAPI;
+
+    await execute(plans, desired, {
+      sequinCli: mockSequinCli(log),
+      sequinApi,
+      openSearch: mockOpenSearch(log),
+      skipBackfill: false,
+      dryRun: false,
+    });
+
+    const applyIdx = log.findIndex(l => l.startsWith("sequin.apply:"));
+    const backfillIdx = log.findIndex(l => l.startsWith("sequin.triggerBackfill:"));
+    expect(applyIdx).toBeGreaterThanOrEqual(0);
+    expect(backfillIdx).toBeGreaterThan(applyIdx);
   });
 });
