@@ -1,7 +1,7 @@
 // Terraform/sequin-style plan formatter
 // Shows config diffs and planned effects in a human-readable format.
 
-import { createTwoFilesPatch } from "diff";
+import { sortedPretty, unifiedDiff } from "../util/diff.js";
 import type {
   Color,
   PipelineConfig,
@@ -47,37 +47,9 @@ function dim(s: string): string { return `${DIM}${s}${RESET}`; }
 // Diff helpers
 // ---------------------------------------------------------------------------
 
-function sortedPretty(obj: unknown): string {
-  return JSON.stringify(JSON.parse(sortedStringify(obj)), null, 2);
-}
-
 function scalarStr(v: unknown): string {
   if (typeof v === "string") return v;
   return JSON.stringify(v);
-}
-
-/** Produce a colored unified diff, skipping the header lines */
-function unifiedDiff(label: string, oldStr: string, newStr: string, indent: string): string {
-  const patch = createTwoFilesPatch("live", "desired", oldStr + "\n", newStr + "\n", "", "", { context: 3 });
-  const lines = patch.split("\n");
-  // Skip the first 4 header lines (===, ---, +++, @@)
-  const result: string[] = [];
-  for (const line of lines) {
-    if (line.startsWith("===") || line.startsWith("---") || line.startsWith("+++")) continue;
-    if (line.startsWith("@@")) {
-      // Show hunk header dimmed
-      result.push(`${indent}${dim(line)}`);
-    } else if (line.startsWith("-")) {
-      result.push(`${indent}${red(line)}`);
-    } else if (line.startsWith("+")) {
-      result.push(`${indent}${green(line)}`);
-    } else if (line.startsWith("\\")) {
-      continue; // "No newline at end of file"
-    } else if (line.length > 0) {
-      result.push(`${indent} ${line.slice(1)}`);
-    }
-  }
-  return result.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +74,7 @@ function diffField(field: string, desired: unknown, live: unknown, indent: strin
 
   // For longer values, use unified diff
   const header = `${indent}${yellow("~")} ${bold(field)}:`;
-  const body = unifiedDiff(field, lStr, dStr, indent + "    ");
+  const body = unifiedDiff(lStr, dStr, indent + "    ");
   return { field, diffText: header + "\n" + body };
 }
 
@@ -112,7 +84,7 @@ function diffJsonField(field: string, desired: unknown, live: unknown, indent: s
   const lStr = sortedPretty(live);
 
   const header = `${indent}${yellow("~")} ${bold(field)}:`;
-  const body = unifiedDiff(field, lStr, dStr, indent + "    ");
+  const body = unifiedDiff(lStr, dStr, indent + "    ");
   return { field, diffText: header + "\n" + body };
 }
 

@@ -1,5 +1,6 @@
 import { OpenSearchClient } from "../../opensearch/client.js";
 import { compareDocs, type CompareResult, type DocSet } from "../../opensearch/compare.js";
+import { sortedPretty, unifiedDiff } from "../../util/diff.js";
 
 interface CompareOptions {
   opensearchUrl: string;
@@ -114,6 +115,7 @@ export async function compareIndexesCommand(
   console.log(` done (${formatDuration(Date.now() - compareStart)})`);
 
   printResult(result, allDocsA.size, indexA, indexB);
+  printSampleDiff(result, allDocsA, allDocsB, indexA, indexB);
 
   const totalElapsed = Date.now() - scrollStart;
   console.log(`\nTotal time: ${formatDuration(totalElapsed)}`);
@@ -167,4 +169,22 @@ function printResult(
   if (result.mismatching.length === 0 && result.onlyInA.length === 0 && result.onlyInB.length === 0) {
     console.log(`\n  ✓ All compared documents match`);
   }
+}
+
+function printSampleDiff(
+  result: CompareResult,
+  docsA: DocSet,
+  docsB: DocSet,
+  indexA: string,
+  indexB: string,
+): void {
+  if (result.mismatching.length === 0) return;
+
+  const id = result.mismatching[Math.floor(Math.random() * result.mismatching.length)]!;
+  const a = docsA.get(id);
+  const b = docsB.get(id);
+  if (a === undefined || b === undefined) return;
+
+  console.log(`\nExample diff — doc _id=${id}:`);
+  console.log(unifiedDiff(sortedPretty(a), sortedPretty(b), "  ", { old: indexA, new: indexB }));
 }
