@@ -195,5 +195,7 @@ function printSampleDiff(
   const canonA = canonicalize(a, ignoreFields);
   const canonB = canonicalize(b, ignoreFields);
   console.log(`\nExample diff — doc _id=${id}:`);
+  console.log(`  \x1b[31m- RED:   ${indexA}\x1b[0m`);
+  console.log(`  \x1b[32m+ GREEN: ${indexB}\x1b[0m`);
   console.log(unifiedDiff(sortedPretty(canonA), sortedPretty(canonB), "  ", { old: indexA, new: indexB }));
 }
