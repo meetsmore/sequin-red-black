@@ -1,5 +1,5 @@
 import { OpenSearchClient } from "../../opensearch/client.js";
-import { compareDocs, type CompareResult, type DocSet } from "../../opensearch/compare.js";
+import { canonicalize, compareDocs, type CompareResult, type DocSet } from "../../opensearch/compare.js";
 import { sortedPretty, unifiedDiff } from "../../util/diff.js";
 
 interface CompareOptions {
@@ -8,6 +8,8 @@ interface CompareOptions {
   opensearchPassword?: string;
   /** Fraction of docs to sample, e.g. 0.01 = 1%. Undefined = compare all. */
   sample?: number;
+  /** Dotted field paths (or path prefixes) to ignore during comparison and diff rendering. */
+  ignoreFields?: string[];
 }
 
 function formatDuration(ms: number): string {
@@ -111,11 +113,15 @@ export async function compareIndexesCommand(
   // 3. Compare
   const compareStart = Date.now();
   process.stdout.write(`\r  Comparing ${allDocsA.size} documents...`);
-  const result = compareDocs(allDocsA, allDocsB);
+  const ignoreFields = opts.ignoreFields ?? [];
+  const result = compareDocs(allDocsA, allDocsB, { ignoreFields });
   console.log(` done (${formatDuration(Date.now() - compareStart)})`);
 
+  if (ignoreFields.length > 0) {
+    console.log(`\nIgnored fields: ${ignoreFields.join(", ")}`);
+  }
   printResult(result, allDocsA.size, indexA, indexB);
-  printSampleDiff(result, allDocsA, allDocsB, indexA, indexB);
+  printSampleDiff(result, allDocsA, allDocsB, indexA, indexB, ignoreFields);
 
   const totalElapsed = Date.now() - scrollStart;
   console.log(`\nTotal time: ${formatDuration(totalElapsed)}`);
@@ -177,6 +183,7 @@ function printSampleDiff(
   docsB: DocSet,
   indexA: string,
   indexB: string,
+  ignoreFields: string[],
 ): void {
   if (result.mismatching.length === 0) return;
 
@@ -185,6 +192,8 @@ function printSampleDiff(
   const b = docsB.get(id);
   if (a === undefined || b === undefined) return;
 
+  const canonA = canonicalize(a, ignoreFields);
+  const canonB = canonicalize(b, ignoreFields);
   console.log(`\nExample diff — doc _id=${id}:`);
-  console.log(unifiedDiff(sortedPretty(a), sortedPretty(b), "  ", { old: indexA, new: indexB }));
+  console.log(unifiedDiff(sortedPretty(canonA), sortedPretty(canonB), "  ", { old: indexA, new: indexB }));
 }
