@@ -73,15 +73,22 @@ onlineOpensearch.command("compare")
   .argument("<indexA>", "First index name")
   .argument("<indexB>", "Second index name")
   .option("--sample <fraction>", "Fraction of docs to randomly sample (e.g. 0.01 = 1%)", parseFloat)
+  .option(
+    "--ignore-fields <paths>",
+    "Comma-separated dotted field paths to ignore (e.g. '_meta,os_indexed_at'). A path also ignores its descendants. Repeatable.",
+    (value: string, prev: string[] = []) => [...prev, ...value.split(",").map(s => s.trim()).filter(Boolean)],
+    [] as string[],
+  )
   .option("--opensearch-url <url>", "OpenSearch URL (env: SRB_OPENSEARCH_URL)", process.env.SRB_OPENSEARCH_URL || "http://localhost:9200")
   .option("--opensearch-user <user>", "OpenSearch user (env: SRB_OPENSEARCH_USER)", process.env.SRB_OPENSEARCH_USER)
   .option("--opensearch-password <pass>", "OpenSearch password (env: SRB_OPENSEARCH_PASSWORD)", process.env.SRB_OPENSEARCH_PASSWORD)
-  .action(async (indexA: string, indexB: string, opts: Record<string, string>) => {
+  .action(async (indexA: string, indexB: string, opts: Record<string, unknown>) => {
     await compareIndexesCommand(indexA, indexB, {
-      opensearchUrl: opts.opensearchUrl,
-      opensearchUser: opts.opensearchUser,
-      opensearchPassword: opts.opensearchPassword,
-      sample: opts.sample ? parseFloat(opts.sample) : undefined,
+      opensearchUrl: opts.opensearchUrl as string,
+      opensearchUser: opts.opensearchUser as string | undefined,
+      opensearchPassword: opts.opensearchPassword as string | undefined,
+      sample: opts.sample as number | undefined,
+      ignoreFields: (opts.ignoreFields as string[] | undefined) ?? [],
     });
   });
 
