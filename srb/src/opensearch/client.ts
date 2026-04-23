@@ -286,7 +286,23 @@ export class OpenSearchClient {
     seed: number = Math.floor(Math.random() * 2 ** 31),
   ): Promise<Map<string, Record<string, unknown>>> {
     const result = new Map<string, Record<string, unknown>>();
-    if (targetCount <= 0) return result;
+    for await (const batch of this.sampleDocsBatched(index, targetCount, seed)) {
+      for (const [id, doc] of batch) result.set(id, doc);
+    }
+    return result;
+  }
+
+  /**
+   * Streaming variant of `sampleDocs` — yields batches of up to ~pageSize
+   * randomly-sampled docs so callers can process and discard them without
+   * materialising the full sample in memory.
+   */
+  async *sampleDocsBatched(
+    index: string,
+    targetCount: number,
+    seed: number = Math.floor(Math.random() * 2 ** 31),
+  ): AsyncGenerator<Map<string, Record<string, unknown>>> {
+    if (targetCount <= 0) return;
 
     const SAFE_PAGE_SIZE = 10000;
     const maxWindow = await this.getMaxResultWindow(index);
@@ -311,8 +327,10 @@ export class OpenSearchClient {
       const data = (await res.json()) as {
         hits: { hits: { _id: string; _source: Record<string, unknown> }[] };
       };
-      for (const hit of data.hits.hits) result.set(hit._id, hit._source);
-      return result;
+      const batch = new Map<string, Record<string, unknown>>();
+      for (const hit of data.hits.hits) batch.set(hit._id, hit._source);
+      if (batch.size > 0) yield batch;
+      return;
     }
 
     // Large N: open a PIT and paginate by the (deterministic) random score.
@@ -326,9 +344,10 @@ export class OpenSearchClient {
 
     try {
       let searchAfter: unknown[] | undefined;
-      while (result.size < targetCount) {
+      let yielded = 0;
+      while (yielded < targetCount) {
         const body: Record<string, unknown> = {
-          size: Math.min(pageSize, targetCount - result.size),
+          size: Math.min(pageSize, targetCount - yielded),
           pit: { id: pitId, keep_alive: "5m" },
           query: scoreQuery,
           sort: [{ _score: "desc" }, { _doc: "asc" }],
@@ -351,7 +370,10 @@ export class OpenSearchClient {
 
         const hits = data.hits.hits;
         if (hits.length === 0) break;
-        for (const hit of hits) result.set(hit._id, hit._source);
+        const batch = new Map<string, Record<string, unknown>>();
+        for (const hit of hits) batch.set(hit._id, hit._source);
+        yield batch;
+        yielded += batch.size;
         searchAfter = hits[hits.length - 1]!.sort;
       }
     } finally {
@@ -360,8 +382,6 @@ export class OpenSearchClient {
         body: JSON.stringify({ pit_id: pitId }),
       }).catch(() => {});
     }
-
-    return result;
   }
 
   /**

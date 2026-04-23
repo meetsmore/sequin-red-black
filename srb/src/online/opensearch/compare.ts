@@ -1,5 +1,5 @@
 import { OpenSearchClient } from "../../opensearch/client.js";
-import { canonicalize, compareDocs, type CompareResult, type DocSet } from "../../opensearch/compare.js";
+import { canonicalize, type CompareResult } from "../../opensearch/compare.js";
 import { sortedPretty, unifiedDiff } from "../../util/diff.js";
 
 interface CompareOptions {
@@ -78,61 +78,78 @@ export async function compareIndexesCommand(
     console.log(`\nComparing all ${countA} documents...`);
   }
 
-  const allDocsA: DocSet = new Map();
   const overallStart = Date.now();
+  const ignoreFields = opts.ignoreFields ?? [];
 
-  if (sample !== undefined) {
-    // Server-side random sample. Avoids transferring the whole dataset
-    // and caps memory at the target count.
-    const target = Math.max(1, Math.round(countA * sample));
-    const sampleStart = Date.now();
-    process.stdout.write(`\r  Sampling ~${target} docs from ${indexA}...`);
-    const sampled = await openSearch.sampleDocs(indexA, target);
-    for (const [id, doc] of sampled) allDocsA.set(id, doc);
-    console.log(`\r  Sampled ${allDocsA.size} docs from ${indexA} in ${formatDuration(Date.now() - sampleStart)}`);
-  } else {
-    let scrolled = 0;
-    const scrollStart = Date.now();
-    for await (const batch of openSearch.scrollDocs(indexA)) {
-      for (const [id, doc] of batch) {
-        allDocsA.set(id, doc);
+  // Stream batches of docs from A, fetch corresponding IDs from B, compare,
+  // discard. This caps memory at one batch worth of docs rather than the full
+  // sample, which matters for large indices (≫10k sampled docs).
+  const target = sample !== undefined ? Math.max(1, Math.round(countA * sample)) : countA;
+  const batchIterator: AsyncIterable<Map<string, Record<string, unknown>>> =
+    sample !== undefined
+      ? openSearch.sampleDocsBatched(indexA, target)
+      : openSearch.scrollDocs(indexA);
+
+  const result: CompareResult = { matching: 0, mismatching: [], onlyInA: [], onlyInB: [] };
+  let exampleDiff: { id: string; a: Record<string, unknown>; b: Record<string, unknown> } | null = null;
+  let compared = 0;
+  const workStart = Date.now();
+  const label = sample !== undefined ? `Sampling+comparing` : `Scrolling+comparing`;
+
+  let lastSeen: [string, Record<string, unknown>] | null = null;
+  for await (const batchA of batchIterator) {
+    for (const [id, doc] of batchA) lastSeen = [id, doc];
+    if (batchA.size === 0) continue;
+
+    const ids = [...batchA.keys()];
+    const batchB = await openSearch.getDocsByIds(indexB, ids);
+
+    for (const [id, docA] of batchA) {
+      const docB = batchB.get(id);
+      if (docB === undefined) {
+        result.onlyInA.push(id);
+        continue;
       }
-      scrolled += batch.size;
-      process.stdout.write(formatProgress(scrolled, countA, scrollStart, `Scrolling ${indexA}`, `selected ${allDocsA.size}`));
+      const canonA = canonicalize(docA, ignoreFields);
+      const canonB = canonicalize(docB, ignoreFields);
+      if (JSON.stringify(canonA) === JSON.stringify(canonB)) {
+        result.matching++;
+      } else {
+        result.mismatching.push(id);
+        if (exampleDiff === null) exampleDiff = { id, a: docA, b: docB };
+      }
     }
-    console.log();
+
+    compared += batchA.size;
+    process.stdout.write(formatProgress(compared, target, workStart, label, `compared ${compared}`));
   }
 
-  // Fetch matching docs from index B
-  const selectedIds = [...allDocsA.keys()];
-  const allDocsB: DocSet = new Map();
-  const batchSize = 1000;
-  let fetched = 0;
-  const fetchStart = Date.now();
-
-  for (let i = 0; i < selectedIds.length; i += batchSize) {
-    const batchIds = selectedIds.slice(i, i + batchSize);
-    const docs = await openSearch.getDocsByIds(indexB, batchIds);
-    for (const [id, doc] of docs) {
-      allDocsB.set(id, doc);
+  // Guarantee at least one doc is compared on non-empty indices.
+  if (compared === 0 && lastSeen !== null) {
+    const [id, docA] = lastSeen;
+    const batchB = await openSearch.getDocsByIds(indexB, [id]);
+    const docB = batchB.get(id);
+    if (docB === undefined) {
+      result.onlyInA.push(id);
+    } else {
+      const canonA = canonicalize(docA, ignoreFields);
+      const canonB = canonicalize(docB, ignoreFields);
+      if (JSON.stringify(canonA) === JSON.stringify(canonB)) {
+        result.matching++;
+      } else {
+        result.mismatching.push(id);
+        exampleDiff = { id, a: docA, b: docB };
+      }
     }
-    fetched = Math.min(i + batchSize, selectedIds.length);
-    process.stdout.write(formatProgress(fetched, selectedIds.length, fetchStart, `Fetching ${indexB}`));
+    compared = 1;
   }
   console.log();
-
-  // 3. Compare
-  const compareStart = Date.now();
-  process.stdout.write(`\r  Comparing ${allDocsA.size} documents...`);
-  const ignoreFields = opts.ignoreFields ?? [];
-  const result = compareDocs(allDocsA, allDocsB, { ignoreFields });
-  console.log(` done (${formatDuration(Date.now() - compareStart)})`);
 
   if (ignoreFields.length > 0) {
     console.log(`\nIgnored fields: ${ignoreFields.join(", ")}`);
   }
-  printResult(result, allDocsA.size, indexA, indexB);
-  printSampleDiff(result, allDocsA, allDocsB, indexA, indexB, ignoreFields);
+  printResult(result, compared, indexA, indexB);
+  printSampleDiff(result, exampleDiff, indexA, indexB, ignoreFields);
 
   const totalElapsed = Date.now() - overallStart;
   console.log(`\nTotal time: ${formatDuration(totalElapsed)}`);
@@ -189,23 +206,17 @@ function printResult(
 }
 
 function printSampleDiff(
-  result: CompareResult,
-  docsA: DocSet,
-  docsB: DocSet,
+  _result: CompareResult,
+  example: { id: string; a: Record<string, unknown>; b: Record<string, unknown> } | null,
   indexA: string,
   indexB: string,
   ignoreFields: string[],
 ): void {
-  if (result.mismatching.length === 0) return;
+  if (example === null) return;
 
-  const id = result.mismatching[Math.floor(Math.random() * result.mismatching.length)]!;
-  const a = docsA.get(id);
-  const b = docsB.get(id);
-  if (a === undefined || b === undefined) return;
-
-  const canonA = canonicalize(a, ignoreFields);
-  const canonB = canonicalize(b, ignoreFields);
-  console.log(`\nExample diff — doc _id=${id}:`);
+  const canonA = canonicalize(example.a, ignoreFields);
+  const canonB = canonicalize(example.b, ignoreFields);
+  console.log(`\nExample diff — doc _id=${example.id}:`);
   console.log(`  \x1b[31m- RED:   ${indexA}\x1b[0m`);
   console.log(`  \x1b[32m+ GREEN: ${indexB}\x1b[0m`);
   console.log(unifiedDiff(sortedPretty(canonA), sortedPretty(canonB), "  ", { old: indexA, new: indexB }));
