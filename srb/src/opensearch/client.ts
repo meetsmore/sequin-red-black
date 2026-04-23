@@ -252,6 +252,114 @@ export class OpenSearchClient {
   }
 
   /**
+   * Read index.max_result_window (default 10000). Used to decide whether
+   * a sample fits in a single search or needs PIT + search_after pagination.
+   */
+  async getMaxResultWindow(index: string): Promise<number> {
+    const res = await this.fetch(`/${index}/_settings?include_defaults=true&flat_settings=true`);
+    if (!res.ok) return 10000;
+    const data = (await res.json()) as Record<string, {
+      settings?: Record<string, unknown>;
+      defaults?: Record<string, unknown>;
+    }>;
+    const entry = data[index];
+    const raw = entry?.settings?.["index.max_result_window"]
+      ?? entry?.defaults?.["index.max_result_window"];
+    const n = typeof raw === "string" ? parseInt(raw, 10) : typeof raw === "number" ? raw : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 10000;
+  }
+
+  /**
+   * Randomly sample up to `targetCount` documents from an index using
+   * OpenSearch-side random_score, avoiding the need to transfer the whole
+   * dataset. Uses a single _search when targetCount fits within
+   * index.max_result_window; otherwise paginates via PIT + search_after
+   * with a deterministic random score so pages don't overlap.
+   */
+  async sampleDocs(
+    index: string,
+    targetCount: number,
+    seed: number = Math.floor(Math.random() * 2 ** 31),
+  ): Promise<Map<string, Record<string, unknown>>> {
+    const result = new Map<string, Record<string, unknown>>();
+    if (targetCount <= 0) return result;
+
+    const maxWindow = await this.getMaxResultWindow(index);
+
+    const scoreQuery = {
+      function_score: {
+        query: { match_all: {} },
+        random_score: { seed, field: "_seq_no" },
+        boost_mode: "replace",
+      },
+    };
+
+    if (targetCount <= maxWindow) {
+      const res = await this.fetch(`/${index}/_search`, {
+        method: "POST",
+        body: JSON.stringify({ size: targetCount, query: scoreQuery }),
+      });
+      if (!res.ok) {
+        throw new Error(`OpenSearch sample /${index}: ${res.status} ${await res.text()}`);
+      }
+      const data = (await res.json()) as {
+        hits: { hits: { _id: string; _source: Record<string, unknown> }[] };
+      };
+      for (const hit of data.hits.hits) result.set(hit._id, hit._source);
+      return result;
+    }
+
+    // Large N: open a PIT and paginate by the (deterministic) random score.
+    const pitRes = await this.fetch(`/${index}/_search/point_in_time?keep_alive=5m`, {
+      method: "POST",
+    });
+    if (!pitRes.ok) {
+      throw new Error(`OpenSearch PIT /${index}: ${pitRes.status} ${await pitRes.text()}`);
+    }
+    let pitId = ((await pitRes.json()) as { pit_id: string }).pit_id;
+
+    try {
+      let searchAfter: unknown[] | undefined;
+      const pageSize = Math.min(maxWindow, 10000);
+      while (result.size < targetCount) {
+        const body: Record<string, unknown> = {
+          size: Math.min(pageSize, targetCount - result.size),
+          pit: { id: pitId, keep_alive: "5m" },
+          query: scoreQuery,
+          sort: [{ _score: "desc" }, { _shard_doc: "asc" }],
+          track_scores: true,
+        };
+        if (searchAfter) body.search_after = searchAfter;
+
+        const res = await this.fetch(`/_search`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          throw new Error(`OpenSearch sample search: ${res.status} ${await res.text()}`);
+        }
+        const data = (await res.json()) as {
+          pit_id?: string;
+          hits: { hits: { _id: string; _source: Record<string, unknown>; sort?: unknown[] }[] };
+        };
+        if (data.pit_id) pitId = data.pit_id;
+
+        const hits = data.hits.hits;
+        if (hits.length === 0) break;
+        for (const hit of hits) result.set(hit._id, hit._source);
+        searchAfter = hits[hits.length - 1]!.sort;
+      }
+    } finally {
+      await this.fetch(`/_search/point_in_time`, {
+        method: "DELETE",
+        body: JSON.stringify({ pit_id: pitId }),
+      }).catch(() => {});
+    }
+
+    return result;
+  }
+
+  /**
    * Fetch specific documents by _id from an index.
    * Returns a Map from _id to _source.
    */

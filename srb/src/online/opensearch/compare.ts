@@ -79,26 +79,29 @@ export async function compareIndexesCommand(
   }
 
   const allDocsA: DocSet = new Map();
-  let scrolled = 0;
-  const scrollStart = Date.now();
-  let lastSeen: [string, Record<string, unknown>] | null = null;
+  const overallStart = Date.now();
 
-  for await (const batch of openSearch.scrollDocs(indexA)) {
-    for (const [id, doc] of batch) {
-      lastSeen = [id, doc];
-      if (sample !== undefined && Math.random() >= sample) continue;
-      allDocsA.set(id, doc);
+  if (sample !== undefined) {
+    // Server-side random sample. Avoids transferring the whole dataset
+    // and caps memory at the target count.
+    const target = Math.max(1, Math.round(countA * sample));
+    const sampleStart = Date.now();
+    process.stdout.write(`\r  Sampling ~${target} docs from ${indexA}...`);
+    const sampled = await openSearch.sampleDocs(indexA, target);
+    for (const [id, doc] of sampled) allDocsA.set(id, doc);
+    console.log(`\r  Sampled ${allDocsA.size} docs from ${indexA} in ${formatDuration(Date.now() - sampleStart)}`);
+  } else {
+    let scrolled = 0;
+    const scrollStart = Date.now();
+    for await (const batch of openSearch.scrollDocs(indexA)) {
+      for (const [id, doc] of batch) {
+        allDocsA.set(id, doc);
+      }
+      scrolled += batch.size;
+      process.stdout.write(formatProgress(scrolled, countA, scrollStart, `Scrolling ${indexA}`, `selected ${allDocsA.size}`));
     }
-    scrolled += batch.size;
-    process.stdout.write(formatProgress(scrolled, countA, scrollStart, `Scrolling ${indexA}`, `selected ${allDocsA.size}`));
+    console.log();
   }
-
-  // Guarantee at least one doc is compared when the index is non-empty, even
-  // at low sample rates on small indices where random selection can yield 0.
-  if (allDocsA.size === 0 && lastSeen !== null) {
-    allDocsA.set(lastSeen[0], lastSeen[1]);
-  }
-  console.log();
 
   // Fetch matching docs from index B
   const selectedIds = [...allDocsA.keys()];
@@ -131,7 +134,7 @@ export async function compareIndexesCommand(
   printResult(result, allDocsA.size, indexA, indexB);
   printSampleDiff(result, allDocsA, allDocsB, indexA, indexB, ignoreFields);
 
-  const totalElapsed = Date.now() - scrollStart;
+  const totalElapsed = Date.now() - overallStart;
   console.log(`\nTotal time: ${formatDuration(totalElapsed)}`);
 
   const hasDiffs = result.mismatching.length > 0 || result.onlyInA.length > 0 || result.onlyInB.length > 0;
