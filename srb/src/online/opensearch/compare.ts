@@ -81,14 +81,22 @@ export async function compareIndexesCommand(
   const allDocsA: DocSet = new Map();
   let scrolled = 0;
   const scrollStart = Date.now();
+  let lastSeen: [string, Record<string, unknown>] | null = null;
 
   for await (const batch of openSearch.scrollDocs(indexA)) {
     for (const [id, doc] of batch) {
+      lastSeen = [id, doc];
       if (sample !== undefined && Math.random() >= sample) continue;
       allDocsA.set(id, doc);
     }
     scrolled += batch.size;
     process.stdout.write(formatProgress(scrolled, countA, scrollStart, `Scrolling ${indexA}`, `selected ${allDocsA.size}`));
+  }
+
+  // Guarantee at least one doc is compared when the index is non-empty, even
+  // at low sample rates on small indices where random selection can yield 0.
+  if (allDocsA.size === 0 && lastSeen !== null) {
+    allDocsA.set(lastSeen[0], lastSeen[1]);
   }
   console.log();
 
