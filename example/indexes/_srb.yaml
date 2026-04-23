@@ -1,0 +1,12 @@
+# Top-level srb orchestrator config.
+# Consumed by `srb offline compile`, embedded in compiled.json.
+
+# Colors the orchestrator is allowed to deploy to.
+# Red and Black are reserved here because pgsync uses those externally —
+# if this list is omitted, all 7 colors are allowed.
+colors:
+  - blue
+  - green
+  - purple
+  - orange
+  - yellow

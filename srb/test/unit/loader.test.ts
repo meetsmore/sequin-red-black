@@ -1,7 +1,8 @@
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { loadPipeline } from "../../src/config/loader.js";
+import { loadPipeline, loadSrbConfig } from "../../src/config/loader.js";
+import { ALL_COLORS } from "../../src/config/types.js";
 
 const tmpDir = path.join(import.meta.dir, ".tmp-loader-test");
 
@@ -97,4 +98,41 @@ test("loads full pipeline without transform.yaml or enrichment.yaml", async () =
   expect(config.index.mappings).toEqual({ properties: { name: { type: "text" } } });
   expect(config.transform.functionBody).toContain("record");
   expect(config.enrichment.source).toContain("Widget");
+});
+
+test("loadSrbConfig: falls back to ALL_COLORS when _srb.yaml is absent", async () => {
+  const dir = path.join(tmpDir, ".no-srb-yaml");
+  await fs.mkdir(dir, { recursive: true });
+  const { colors } = await loadSrbConfig(dir);
+  expect(colors).toEqual(ALL_COLORS);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("loadSrbConfig: reads colors allowlist from _srb.yaml", async () => {
+  const dir = path.join(tmpDir, ".with-srb-yaml");
+  await fs.mkdir(dir, { recursive: true });
+  await Bun.write(
+    path.join(dir, "_srb.yaml"),
+    `colors:\n  - blue\n  - green\n  - purple\n`,
+  );
+  const { colors } = await loadSrbConfig(dir);
+  expect(colors).toEqual(["blue", "green", "purple"]);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("loadSrbConfig: rejects invalid color names", async () => {
+  const dir = path.join(tmpDir, ".bad-srb-yaml");
+  await fs.mkdir(dir, { recursive: true });
+  await Bun.write(path.join(dir, "_srb.yaml"), `colors:\n  - mauve\n`);
+  await expect(loadSrbConfig(dir)).rejects.toThrow(/invalid color/);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("loadSrbConfig: empty/missing colors list falls back to ALL_COLORS", async () => {
+  const dir = path.join(tmpDir, ".empty-srb-yaml");
+  await fs.mkdir(dir, { recursive: true });
+  await Bun.write(path.join(dir, "_srb.yaml"), `colors: []\n`);
+  const { colors } = await loadSrbConfig(dir);
+  expect(colors).toEqual(ALL_COLORS);
+  await fs.rm(dir, { recursive: true, force: true });
 });

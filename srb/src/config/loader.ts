@@ -1,7 +1,8 @@
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { readdir } from "fs/promises";
-import type { PipelineConfig, WebhookConfig } from "./types.js";
+import type { Color, CompiledConfig, PipelineConfig, WebhookConfig } from "./types.js";
+import { ALL_COLORS } from "./types.js";
 
 interface RawSinkYaml {
   name: string;
@@ -144,4 +145,34 @@ export async function loadAll(indexesDir: string): Promise<Map<string, PipelineC
   const pipelines = entries.filter(e => e.isDirectory() && !e.name.startsWith("_") && e.name !== "opensearch");
   const results = await Promise.all(pipelines.map(e => loadPipeline(e.name, indexesDir)));
   return new Map(results.map(p => [p.name, p]));
+}
+
+/** Load the top-level srb config (`_srb.yaml`) from the indexes dir. Returns `{ colors }`; missing file falls back to ALL_COLORS. */
+export async function loadSrbConfig(indexesDir: string): Promise<{ colors: Color[] }> {
+  const filePath = path.join(indexesDir, "_srb.yaml");
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) {
+    return { colors: ALL_COLORS };
+  }
+  const raw = yaml.load(await file.text()) as { colors?: unknown } | null;
+  if (!raw || !Array.isArray(raw.colors) || raw.colors.length === 0) {
+    return { colors: ALL_COLORS };
+  }
+  const valid = new Set<string>(ALL_COLORS);
+  const colors: Color[] = [];
+  for (const c of raw.colors) {
+    if (typeof c !== "string" || !valid.has(c)) {
+      throw new Error(`_srb.yaml: invalid color '${String(c)}'. Must be one of: ${ALL_COLORS.join(", ")}`);
+    }
+    colors.push(c as Color);
+  }
+  return { colors };
+}
+
+export async function loadAllWithConfig(indexesDir: string): Promise<CompiledConfig> {
+  const [pipelines, { colors }] = await Promise.all([
+    loadAll(indexesDir),
+    loadSrbConfig(indexesDir),
+  ]);
+  return { colors, pipelines };
 }

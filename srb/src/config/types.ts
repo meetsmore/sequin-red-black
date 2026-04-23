@@ -48,6 +48,13 @@ export interface PipelineConfig {
   webhooks: WebhookConfig[];
 }
 
+/** Top-level compiled config. Emitted by `srb offline compile`, consumed by online commands. */
+export interface CompiledConfig {
+  /** Colors the orchestrator is allowed to deploy to. Loaded from indexes/_srb.yaml (falls back to ALL_COLORS). */
+  colors: Color[];
+  pipelines: Map<string, PipelineConfig>;
+}
+
 export interface WebhookConfig {
   name: string;
   sink: SinkConfig;

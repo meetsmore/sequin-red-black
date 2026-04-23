@@ -2,7 +2,6 @@ import { discoverLiveState } from "../state/discover.js";
 import { generatePlans } from "../planner/plan.js";
 import { formatPlans } from "../planner/format.js";
 import { execute } from "../executor/executor.js";
-import { ALL_COLORS } from "../config/types.js";
 import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
 
 export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolean; autoApprove?: boolean; nukeSequin?: boolean }): Promise<void> {
@@ -21,9 +20,9 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
     console.log("Nuke: done\n");
   }
 
-  const desired = await loadCompiled(opts.compiled);
+  const { colors, pipelines: desired } = await loadCompiled(opts.compiled);
   const { pipelines: live, aliases, occupiedColors } = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
-  const plans = generatePlans(desired, live, ALL_COLORS, aliases, occupiedColors);
+  const plans = generatePlans(desired, live, colors, aliases, occupiedColors);
 
   if (plans.length === 0) {
     console.log("No changes. Infrastructure is up to date.");

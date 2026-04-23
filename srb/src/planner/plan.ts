@@ -33,34 +33,35 @@ export function pipelineChangeKind(
   return "no_change";
 }
 
-/** Pick an available color for a pipeline — tries preferred color first, then first available */
+/** Pick an available color for a pipeline — tries preferred color first, then first available from `allowedColors` */
 export function pickTargetColor(
   pipeline: string,
   live: Map<PipelineKey, LivePipelineState>,
   occupiedColors?: Map<string, Set<Color>>,
   preferredColor?: Color,
+  allowedColors: Color[] = ALL_COLORS,
 ): Color {
   const occupied = occupiedColors?.get(pipeline);
   const isAvailable = (c: Color) =>
     !live.has(pipelineKey(pipeline, c)) && !occupied?.has(c);
 
-  if (preferredColor && isAvailable(preferredColor)) {
+  if (preferredColor && allowedColors.includes(preferredColor) && isAvailable(preferredColor)) {
     return preferredColor;
   }
-  for (const c of ALL_COLORS) {
+  for (const c of allowedColors) {
     if (isAvailable(c)) {
       return c;
     }
   }
-  // Fallback (should not happen with 7 colors and at most 2-3 active)
-  return "red";
+  // Fallback: first allowed color (should not happen unless every allowed color is already occupied)
+  return allowedColors[0] ?? "red";
 }
 
 /** Generate plans for all pipelines that have changes */
 export function generatePlans(
   desired: Map<string, PipelineConfig>,
   live: Map<PipelineKey, LivePipelineState>,
-  _allColors: Color[] = ALL_COLORS,
+  allowedColors: Color[] = ALL_COLORS,
   aliases?: Map<string, Color>,
   occupiedColors?: Map<string, Set<Color>>,
 ): Plan[] {
@@ -79,7 +80,7 @@ export function generatePlans(
 
   for (const pipeline of pipelineNames) {
     const kind = pipelineChangeKind(pipeline, desired, live);
-    const targetColor = pickTargetColor(pipeline, live, occupiedColors, preferredColor);
+    const targetColor = pickTargetColor(pipeline, live, occupiedColors, preferredColor, allowedColors);
     if (!preferredColor) preferredColor = targetColor;
 
     let effects: Plan["effects"] = [];

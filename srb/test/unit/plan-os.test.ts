@@ -32,3 +32,36 @@ describe("pickTargetColor with occupiedColors", () => {
     expect(color).toBe("red");
   });
 });
+
+describe("pickTargetColor with allowedColors", () => {
+  test("skips disallowed colors even when available", () => {
+    const live = new Map<PipelineKey, LivePipelineState>();
+    const allowed: Color[] = ["blue", "green", "purple", "orange", "yellow"];
+
+    const color = pickTargetColor("jobs", live, undefined, undefined, allowed);
+
+    expect(color).toBe("blue");
+    expect(color).not.toBe("red");
+    expect(color).not.toBe("black");
+  });
+
+  test("ignores preferredColor when it is not in allowedColors", () => {
+    const live = new Map<PipelineKey, LivePipelineState>();
+    const allowed: Color[] = ["blue", "green"];
+
+    const color = pickTargetColor("jobs", live, undefined, "red", allowed);
+
+    expect(color).toBe("blue");
+  });
+
+  test("picks first allowed color that is not occupied", () => {
+    const live = new Map<PipelineKey, LivePipelineState>([
+      ["jobs:blue" as PipelineKey, {} as LivePipelineState],
+    ]);
+    const allowed: Color[] = ["blue", "green", "purple"];
+
+    const color = pickTargetColor("jobs", live, undefined, undefined, allowed);
+
+    expect(color).toBe("green");
+  });
+});
