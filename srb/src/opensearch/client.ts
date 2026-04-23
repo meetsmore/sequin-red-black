@@ -331,7 +331,7 @@ export class OpenSearchClient {
           size: Math.min(pageSize, targetCount - result.size),
           pit: { id: pitId, keep_alive: "5m" },
           query: scoreQuery,
-          sort: [{ _score: "desc" }, { _shard_doc: "asc" }],
+          sort: [{ _score: "desc" }, { _doc: "asc" }],
           track_scores: true,
         };
         if (searchAfter) body.search_after = searchAfter;
