@@ -272,9 +272,13 @@ export class OpenSearchClient {
   /**
    * Randomly sample up to `targetCount` documents from an index using
    * OpenSearch-side random_score, avoiding the need to transfer the whole
-   * dataset. Uses a single _search when targetCount fits within
-   * index.max_result_window; otherwise paginates via PIT + search_after
-   * with a deterministic random score so pages don't overlap.
+   * dataset. Uses a single _search for small samples; otherwise paginates
+   * via PIT + search_after with a deterministic random score so pages
+   * don't overlap. The single-search threshold is intentionally
+   * conservative (SAFE_PAGE_SIZE) rather than index.max_result_window,
+   * because large single responses can exceed proxy/LB buffer or timeout
+   * limits and surface as 502 Bad Gateway even when OpenSearch would
+   * have accepted the request.
    */
   async sampleDocs(
     index: string,
@@ -284,7 +288,9 @@ export class OpenSearchClient {
     const result = new Map<string, Record<string, unknown>>();
     if (targetCount <= 0) return result;
 
+    const SAFE_PAGE_SIZE = 10000;
     const maxWindow = await this.getMaxResultWindow(index);
+    const pageSize = Math.min(SAFE_PAGE_SIZE, maxWindow);
 
     const scoreQuery = {
       function_score: {
@@ -294,7 +300,7 @@ export class OpenSearchClient {
       },
     };
 
-    if (targetCount <= maxWindow) {
+    if (targetCount <= pageSize) {
       const res = await this.fetch(`/${index}/_search`, {
         method: "POST",
         body: JSON.stringify({ size: targetCount, query: scoreQuery }),
@@ -320,7 +326,6 @@ export class OpenSearchClient {
 
     try {
       let searchAfter: unknown[] | undefined;
-      const pageSize = Math.min(maxWindow, 10000);
       while (result.size < targetCount) {
         const body: Record<string, unknown> = {
           size: Math.min(pageSize, targetCount - result.size),
