@@ -11,7 +11,7 @@ import {
   pipelineKey,
   parseKey,
 } from "../config/types.js";
-import { effectsForCreate, effectsForUpdate, pipelineHasChanges } from "./effects.js";
+import { effectsForCreate, effectsForInPlaceFullUpdate, effectsForUpdate, pipelineHasChanges } from "./effects.js";
 
 export type ChangeKind = "create" | "update" | "delete" | "no_change";
 
@@ -57,6 +57,17 @@ export function pickTargetColor(
   return allowedColors[0] ?? "red";
 }
 
+export interface GeneratePlansOptions {
+  /**
+   * Update the currently-active color in place instead of provisioning a
+   * fresh color and performing a red-black swap. Only affects `update`
+   * plans; `create` and `delete` are unchanged. Index mapping/settings
+   * changes are skipped (warn and keep going) — callers who need those
+   * should use red-black.
+   */
+  inPlace?: boolean;
+}
+
 /** Generate plans for all pipelines that have changes */
 export function generatePlans(
   desired: Map<string, PipelineConfig>,
@@ -64,6 +75,7 @@ export function generatePlans(
   allowedColors: Color[] = ALL_COLORS,
   aliases?: Map<string, Color>,
   occupiedColors?: Map<string, Set<Color>>,
+  options: GeneratePlansOptions = {},
 ): Plan[] {
   // Get all pipeline names from desired + live
   const pipelineNames = new Set<string>();
@@ -80,7 +92,16 @@ export function generatePlans(
 
   for (const pipeline of pipelineNames) {
     const kind = pipelineChangeKind(pipeline, desired, live);
-    const targetColor = pickTargetColor(pipeline, live, occupiedColors, preferredColor, allowedColors);
+
+    // In-place update mode: target the active color (from alias) for updates.
+    // Falls back to the normal color picker if there is no active color yet
+    // (e.g. first-ever deploy of this pipeline) or for non-update kinds.
+    const activeColorForInPlace =
+      options.inPlace && kind === "update" ? aliases?.get(pipeline) : undefined;
+    const targetColor =
+      activeColorForInPlace && live.has(pipelineKey(pipeline, activeColorForInPlace))
+        ? activeColorForInPlace
+        : pickTargetColor(pipeline, live, occupiedColors, preferredColor, allowedColors);
     if (!preferredColor) preferredColor = targetColor;
 
     let effects: Plan["effects"] = [];
@@ -98,7 +119,9 @@ export function generatePlans(
         const liveState = live.get(pipelineKey(pipeline, liveColor))!;
         const cfg = desired.get(pipeline)!;
         if (pipelineHasChanges(cfg, liveState)) {
-          effects = effectsForUpdate(pipeline, cfg, liveState, targetColor);
+          effects = options.inPlace && activeColorForInPlace
+            ? effectsForInPlaceFullUpdate(pipeline, cfg, liveState)
+            : effectsForUpdate(pipeline, cfg, liveState, targetColor);
         }
       }
     }
@@ -109,6 +132,7 @@ export function generatePlans(
         pipeline,
         targetColor,
         effects,
+        inPlace: options.inPlace && kind === "update" && activeColorForInPlace !== undefined,
       });
     }
   }

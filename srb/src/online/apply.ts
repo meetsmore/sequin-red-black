@@ -4,7 +4,7 @@ import { formatPlans } from "../planner/format.js";
 import { execute } from "../executor/executor.js";
 import { createClients, loadCompiled, type OnlineOptions } from "./shared.js";
 
-export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolean; autoApprove?: boolean; nukeSequin?: boolean }): Promise<void> {
+export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolean; autoApprove?: boolean; nukeSequin?: boolean; inPlace?: boolean }): Promise<void> {
   const { sequinCli, sequinApi, openSearch } = createClients(opts);
 
   if (opts.nukeSequin) {
@@ -22,7 +22,13 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
 
   const { colors, pipelines: desired } = await loadCompiled(opts.compiled);
   const { pipelines: live, aliases, occupiedColors } = await discoverLiveState(sequinCli, sequinApi, openSearch, desired);
-  const plans = generatePlans(desired, live, colors, aliases, occupiedColors);
+  // Nuke takes priority: after deleting all sinks, in-place has nothing to target
+  // so the normal create path kicks in regardless.
+  const inPlace = (opts.inPlace ?? false) && !opts.nukeSequin;
+  if (inPlace) {
+    console.log("In-place mode: updating current active color; skipping red-black swap and index changes.\n");
+  }
+  const plans = generatePlans(desired, live, colors, aliases, occupiedColors, { inPlace });
 
   if (plans.length === 0) {
     console.log("No changes. Infrastructure is up to date.");

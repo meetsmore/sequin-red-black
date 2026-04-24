@@ -125,4 +125,6 @@ export interface Plan {
   pipeline: string;
   targetColor: Color;
   effects: PlannedEffect[];
+  /** True when this plan updates the active color in place (no red-black swap). */
+  inPlace?: boolean;
 }

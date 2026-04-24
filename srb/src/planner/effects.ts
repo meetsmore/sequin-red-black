@@ -218,6 +218,41 @@ export function effectsForInPlaceUpdate(
   ];
 }
 
+/**
+ * Effects for updating all resources in place on an existing color.
+ *
+ * Unlike `effectsForInPlaceUpdate` (which covers operational-only sink tweaks
+ * like batch size), this is the "skip red-black" path: it re-emits the full
+ * set of declarative Sequin resources against the already-active color so
+ * `sequin config apply` updates them by name. Index mapping/settings changes
+ * are intentionally *not* applied — the existing index stays put. If you need
+ * a mapping change, use red-black.
+ *
+ * Caller responsibility: `targetColor` on the Plan must be set to the active
+ * color so resource names line up with what Sequin already has.
+ */
+export function effectsForInPlaceFullUpdate(
+  _pipeline: string,
+  desired: PipelineConfig,
+  _live: LivePipelineState,
+): PlannedEffect[] {
+  const primary: PlannedEffect[] = [
+    { effect: { kind: "CreateTransform", transform: desired.transform }, status: "pending", dependsOn: [], order: 1 },
+    { effect: { kind: "CreateEnrichment", enrichment: desired.enrichment }, status: "pending", dependsOn: [], order: 2 },
+    { effect: { kind: "CreateSink", sink: desired.sink }, status: "pending", dependsOn: [1, 2], order: 3 },
+  ];
+  const webhookEffects: PlannedEffect[] = [];
+  for (const wh of desired.webhooks) {
+    const base = 3 + webhookEffects.length;
+    webhookEffects.push(
+      { effect: { kind: "CreateTransform", transform: wh.transform }, status: "pending", dependsOn: [], order: base + 1 },
+      { effect: { kind: "CreateEnrichment", enrichment: wh.enrichment }, status: "pending", dependsOn: [], order: base + 2 },
+      { effect: { kind: "CreateSink", sink: wh.sink }, status: "pending", dependsOn: [base + 1, base + 2], order: base + 3 },
+    );
+  }
+  return [...primary, ...webhookEffects];
+}
+
 /** Effects for updating a pipeline — dispatches to backfill, reindex, or in-place */
 export function effectsForUpdate(
   pipeline: string,

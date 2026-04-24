@@ -54,7 +54,8 @@ addConnectionOpts(online.command("apply").description("Apply planned changes"))
   .option("--skip-backfill", "Skip backfill triggers")
   .option("--auto-approve", "Skip confirmation prompt")
   .option("--nuke-sequin", "Delete all existing Sequin sinks before applying")
-  .action(async (opts) => { await applyCommand({ ...getOnlineOpts(opts), skipBackfill: opts.skipBackfill, autoApprove: opts.autoApprove, nukeSequin: opts.nukeSequin }); });
+  .option("--in-place", "Update current active color in place (skip red-black swap; ignores index changes). Overridden by --nuke-sequin.")
+  .action(async (opts) => { await applyCommand({ ...getOnlineOpts(opts), skipBackfill: opts.skipBackfill, autoApprove: opts.autoApprove, nukeSequin: opts.nukeSequin, inPlace: opts.inPlace }); });
 
 addConnectionOpts(online.command("activate").description("Activate a colored variant").argument("<pipeline>", "Pipeline name").argument("<color>", "Color to activate"))
   .action(async (pipeline: string, color: string, opts: Record<string, string>) => { await activateCommand(pipeline, color, getOnlineOpts(opts)); });

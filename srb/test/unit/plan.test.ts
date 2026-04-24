@@ -273,6 +273,62 @@ describe("generatePlans", () => {
     expect(plans[0].effects[0].effect.kind).toBe("UpdateSink");
   });
 
+  test("in-place mode targets active color and skips backfill/reindex/swap", () => {
+    // Transform changed: normally triggers red-black with CreateIndex + TriggerBackfill
+    // onto a fresh color. In in-place mode we keep red and just refresh the sequin
+    // resources.
+    const desired = new Map([
+      ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [pipelineKey("jobs", "red"), fixtureLiveState()],
+    ]);
+    const aliases = new Map<string, "red" | "black" | "blue" | "green" | "purple" | "orange" | "yellow">([["jobs", "red"]]);
+
+    const plans = generatePlans(desired, live, undefined, aliases, undefined, { inPlace: true });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].pipeline).toBe("jobs");
+    expect(plans[0].targetColor).toBe("red");
+    expect(plans[0].inPlace).toBe(true);
+    const kinds = plans[0].effects.map((e) => e.effect.kind);
+    expect(kinds).toEqual(["CreateTransform", "CreateEnrichment", "CreateSink"]);
+    // No CreateIndex / TriggerBackfill / TriggerReindex / SwapAlias
+    expect(kinds).not.toContain("CreateIndex");
+    expect(kinds).not.toContain("TriggerBackfill");
+    expect(kinds).not.toContain("TriggerReindex");
+    expect(kinds).not.toContain("SwapAlias");
+  });
+
+  test("in-place mode with no active alias falls back to normal red-black", () => {
+    const desired = new Map([
+      ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [pipelineKey("jobs", "red"), fixtureLiveState()],
+    ]);
+    // no aliases passed — pipeline has no active color yet
+
+    const plans = generatePlans(desired, live, undefined, undefined, undefined, { inPlace: true });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].inPlace).toBe(false);
+    expect(plans[0].targetColor).toBe("black"); // normal path picks next color
+    expect(plans[0].effects.map((e) => e.effect.kind)).toContain("TriggerBackfill");
+  });
+
+  test("in-place mode leaves create plans alone", () => {
+    const desired = new Map([["jobs", fixturePipeline()]]);
+    const live = new Map<PipelineKey, LivePipelineState>();
+
+    const plans = generatePlans(desired, live, undefined, undefined, undefined, { inPlace: true });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].inPlace).toBe(false);
+    expect(plans[0].effects.map((e) => e.effect.kind)).toContain("CreateIndex");
+    expect(plans[0].effects.map((e) => e.effect.kind)).toContain("TriggerBackfill");
+  });
+
   test("two pipelines (jobs + clients) -> 2 independent plans", () => {
     const desired = new Map([
       ["jobs", fixturePipeline()],

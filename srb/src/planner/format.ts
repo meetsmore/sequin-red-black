@@ -206,9 +206,11 @@ function strategyLabel(
   kind: "create" | "update",
   desired: PipelineConfig,
   live?: LivePipelineState,
+  inPlace?: boolean,
 ): string {
   if (kind === "create") return green("new pipeline");
   if (!live) return yellow("update");
+  if (inPlace) return yellow("in-place (forced)") + dim(" (updating active color; index changes skipped)");
   if (needsBackfill(desired, live)) return yellow("backfill") + dim(" (transform/enrichment/data changed)");
   if (needsReindex(desired, live)) return yellow("reindex") + dim(" (index mappings/settings changed)");
   if (needsInPlaceUpdate(desired, live)) return yellow("in-place update") + dim(" (operational fields only)");
@@ -233,7 +235,7 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
     const live = liveColor ? ctx.live.get(pipelineKey(plan.pipeline, liveColor)) : undefined;
 
     // Header
-    const strategy = strategyLabel(kind as "create" | "update", desired!, live);
+    const strategy = strategyLabel(kind as "create" | "update", desired!, live, plan.inPlace);
     diffLines.push(bold(`Pipeline: ${cyan(plan.pipeline)}`));
     diffLines.push(`  Strategy: ${strategy}`);
     diffLines.push(`  Target color: ${bold(plan.targetColor)}`);
