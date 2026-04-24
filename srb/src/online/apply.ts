@@ -30,6 +30,17 @@ export async function applyCommand(opts: OnlineOptions & { skipBackfill?: boolea
   }
   const plans = generatePlans(desired, live, colors, aliases, occupiedColors, { inPlace });
 
+  // In in-place mode, surface any pipelines that had to fall back to the
+  // normal red-black path (e.g. because nothing exists yet to update in
+  // place) — otherwise the "_green" suffix appears out of nowhere.
+  if (inPlace) {
+    for (const plan of plans) {
+      if (!plan.inPlace && plan.effects.length > 0) {
+        console.warn(`⚠ ${plan.pipeline}: in-place requested but no existing pipeline to update — falling back to ${plan.targetColor}`);
+      }
+    }
+  }
+
   if (plans.length === 0) {
     console.log("No changes. Infrastructure is up to date.");
     process.exit(0);

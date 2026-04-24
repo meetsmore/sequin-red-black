@@ -300,21 +300,23 @@ describe("generatePlans", () => {
     expect(kinds).not.toContain("SwapAlias");
   });
 
-  test("in-place mode with no active alias falls back to normal red-black", () => {
+  test("in-place mode with no alias still targets the only live color", () => {
+    // The alias may be missing (e.g. dropped manually) while live sinks exist.
+    // In-place should still update what's there rather than silently spinning
+    // up a fresh color.
     const desired = new Map([
       ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
     ]);
     const live = new Map<PipelineKey, LivePipelineState>([
       [pipelineKey("jobs", "red"), fixtureLiveState()],
     ]);
-    // no aliases passed — pipeline has no active color yet
 
     const plans = generatePlans(desired, live, undefined, undefined, undefined, { inPlace: true });
 
     expect(plans).toHaveLength(1);
-    expect(plans[0].inPlace).toBe(false);
-    expect(plans[0].targetColor).toBe("black"); // normal path picks next color
-    expect(plans[0].effects.map((e) => e.effect.kind)).toContain("TriggerBackfill");
+    expect(plans[0].inPlace).toBe(true);
+    expect(plans[0].targetColor).toBe("red");
+    expect(plans[0].effects.map((e) => e.effect.kind)).not.toContain("TriggerBackfill");
   });
 
   test("in-place mode leaves create plans alone", () => {

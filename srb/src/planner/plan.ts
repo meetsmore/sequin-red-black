@@ -93,15 +93,21 @@ export function generatePlans(
   for (const pipeline of pipelineNames) {
     const kind = pipelineChangeKind(pipeline, desired, live);
 
-    // In-place update mode: target the active color (from alias) for updates.
-    // Falls back to the normal color picker if there is no active color yet
-    // (e.g. first-ever deploy of this pipeline) or for non-update kinds.
-    const activeColorForInPlace =
-      options.inPlace && kind === "update" ? aliases?.get(pipeline) : undefined;
+    // In-place update mode: target whichever color this pipeline already has.
+    // Prefer the alias (true active color). If the alias is missing
+    // (e.g. never activated, or was dropped manually) but a live sink+index
+    // exist at some color, use that — the intent of in-place is "don't make
+    // a new copy", so use what's there. Only non-update kinds (create)
+    // fall back to the normal color picker.
+    const inPlaceColor: Color | undefined = (() => {
+      if (!options.inPlace || kind !== "update") return undefined;
+      const aliased = aliases?.get(pipeline);
+      if (aliased && live.has(pipelineKey(pipeline, aliased))) return aliased;
+      return ALL_COLORS.find((c) => live.has(pipelineKey(pipeline, c)));
+    })();
     const targetColor =
-      activeColorForInPlace && live.has(pipelineKey(pipeline, activeColorForInPlace))
-        ? activeColorForInPlace
-        : pickTargetColor(pipeline, live, occupiedColors, preferredColor, allowedColors);
+      inPlaceColor ??
+      pickTargetColor(pipeline, live, occupiedColors, preferredColor, allowedColors);
     if (!preferredColor) preferredColor = targetColor;
 
     let effects: Plan["effects"] = [];
@@ -119,7 +125,7 @@ export function generatePlans(
         const liveState = live.get(pipelineKey(pipeline, liveColor))!;
         const cfg = desired.get(pipeline)!;
         if (pipelineHasChanges(cfg, liveState)) {
-          effects = options.inPlace && activeColorForInPlace
+          effects = options.inPlace && inPlaceColor
             ? effectsForInPlaceFullUpdate(pipeline, cfg, liveState)
             : effectsForUpdate(pipeline, cfg, liveState, targetColor);
         }
@@ -132,7 +138,7 @@ export function generatePlans(
         pipeline,
         targetColor,
         effects,
-        inPlace: options.inPlace && kind === "update" && activeColorForInPlace !== undefined,
+        inPlace: options.inPlace && kind === "update" && inPlaceColor !== undefined,
       });
     }
   }
