@@ -11,6 +11,7 @@ import type {
   PipelineKey,
 } from "../config/types.js";
 import { ALL_COLORS, pipelineKey } from "../config/types.js";
+import { colorizeName } from "../config/color.js";
 import {
   sinkDataChanged,
   sinkOperationalChanged,
@@ -135,18 +136,22 @@ function diffEnrichmentResource(desired: PipelineConfig, live: LivePipelineState
 // ---------------------------------------------------------------------------
 
 function formatEffect(effect: Effect, pipeline: string, color: Color): string {
-  const colored = `${pipeline}_${color}`;
+  // Use the resource's own bare id (which may belong to either the main
+  // pipeline or a webhook) and colorize it the same way the executor and
+  // yaml-gen do — so the name printed here is the exact name a reader
+  // would find in Sequin / OpenSearch after apply.
   switch (effect.kind) {
     case "CreateIndex":
-      return `${green("+")} create index ${cyan(`"${effect.index.name}"`)}`;
+      return `${green("+")} create index ${cyan(`"${colorizeName(effect.index.id, color)}"`)}`;
     case "CreateTransform":
-      return `${green("+")} create function ${cyan(`"${effect.transform.name}"`)}`;
+      return `${green("+")} create function ${cyan(`"${colorizeName(effect.transform.id, color)}"`)}`;
     case "CreateEnrichment":
-      return `${green("+")} create function ${cyan(`"${effect.enrichment.name}"`)}`;
+      return `${green("+")} create function ${cyan(`"${colorizeName(effect.enrichment.id, color)}"`)}`;
     case "CreateSink":
-      return `${green("+")} create sink ${cyan(`"${effect.sink.name}"`)}`;
+      return `${green("+")} create sink ${cyan(`"${colorizeName(effect.sink.id, color)}"`)}`;
     case "UpdateSink":
-      return `${yellow("~")} update sink ${cyan(`"${effect.config.name}"`)}`;
+      // id comes from live state and is already colored.
+      return `${yellow("~")} update sink ${cyan(`"${effect.id}"`)}`;
     case "DeleteSink":
       return `${red("-")} delete sink ${cyan(`"${effect.id}"`)}`;
     case "DeleteTransform":
@@ -156,11 +161,14 @@ function formatEffect(effect: Effect, pipeline: string, color: Color): string {
     case "DeleteIndex":
       return `${red("-")} delete index ${cyan(`"${effect.id}"`)}`;
     case "TriggerBackfill":
-      return `${yellow("~")} trigger backfill on ${cyan(`"${effect.sinkId}"`)}`;
+      // sinkId from a fresh-create plan is the bare pipeline name; colorize
+      // it so we report the actual sink that gets backfilled.
+      return `${yellow("~")} trigger backfill on ${cyan(`"${colorizeName(effect.sinkId, color)}"`)}`;
     case "TriggerReindex":
-      return `${yellow("~")} trigger reindex ${cyan(`"${effect.source}"`)} → ${cyan(`"${effect.target}"`)}`;
+      // source comes from live state (already colored); target is bare.
+      return `${yellow("~")} trigger reindex ${cyan(`"${effect.source}"`)} → ${cyan(`"${colorizeName(effect.target, color)}"`)}`;
     case "SwapAlias":
-      return `${yellow("~")} swap alias ${cyan(`"${effect.pipeline}"`)} → ${cyan(`"${colored}"`)}`;
+      return `${yellow("~")} swap alias ${cyan(`"${effect.pipeline}"`)} → ${cyan(`"${colorizeName(effect.pipeline, color)}"`)}`;
   }
 }
 
