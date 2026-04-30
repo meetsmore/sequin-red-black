@@ -1411,6 +1411,178 @@ module commands_test {
       })
   }
 
+  // ---------------------------------------------------------------------------
+  // --in-place mode: forces a full update of transform/enrichment/sink against
+  // the deployed color, even when the diff would normally trigger a backfill or
+  // reindex. Never rolls a new color for an already-deployed pipeline.
+  // ---------------------------------------------------------------------------
+
+  // Scenario: in-place forces full update against the deployed color when the
+  // change would normally roll a new color (transform body changed → backfill).
+  run test_e2e_in_place_forces_full_update = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        cmd_activate("jobs", color)
+      )
+      // Change transform — would normally trigger a fresh-color backfill
+      .then(
+        val updated_transform = { ...fixture_transform_config, function_body: "fn(row) => { ...row, x: 1 }" }
+        val updated_config = { ...fixture_pipeline_config, transform: updated_transform }
+        load_desired_config("jobs", updated_config)
+      )
+      .then(cmd_plan_in_place)
+      .then(all {
+        assert(current_plans.size() == 1),
+        // No CreateIndex (would mean new color rolled)
+        assert(current_plans.forall(p => not(plan_creates_new_color(p)))),
+        // No TriggerBackfill / TriggerReindex
+        assert(current_plans.forall(p => not(p.effects.indices().exists(i =>
+          match p.effects[i].effect {
+            | TriggerBackfill(_) => true
+            | TriggerReindex(_) => true
+            | _ => false
+          }
+        )))),
+        // Plan targets a deployed color (not a fresh one)
+        assert(current_plans.forall(p =>
+          (p.pipeline, p.target_color).in(live_pipelines.keys())
+        )),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+      .then(cmd_apply_in_place(false))
+      .then(
+        val jobs_colors = ALL_COLORS.filter(c => ("jobs", c).in(live_pipelines.keys()))
+        val color = deployed_color_for("jobs", live_pipelines)
+        all {
+          // Still exactly one color (no new color rolled)
+          assert(jobs_colors.size() == 1),
+          // Transform updated
+          assert(live_pipelines.get(("jobs", color)).transform.config.function_body == "fn(row) => { ...row, x: 1 }"),
+          // Sink not backfilling (in-place doesn't trigger backfill)
+          assert(not(live_pipelines.get(("jobs", color)).sink.backfilling)),
+          // Index unchanged
+          assert(live_pipelines.get(("jobs", color)).index.status == IndexGreen),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+          os_indices' = os_indices,
+        }
+      )
+  }
+
+  // Scenario: in-place targets the deployed color regardless of where the
+  // OpenSearch alias points. Simulates a state where the alias was set
+  // manually to a non-deployed color (legacy pgsync, manual surgery, etc.).
+  run test_e2e_in_place_ignores_alias = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      // Skip activate — alias never gets set, simulating "alias points
+      // elsewhere or doesn't exist". The deployed color must still win.
+      .then(
+        val updated_transform = { ...fixture_transform_config, function_body: "drift" }
+        val updated_config = { ...fixture_pipeline_config, transform: updated_transform }
+        load_desired_config("jobs", updated_config)
+      )
+      .then(cmd_plan_in_place)
+      .then(
+        val deployed = deployed_color_for("jobs", live_pipelines)
+        all {
+          assert(current_plans.size() == 1),
+          assert(current_plans.forall(p => p.target_color == deployed)),
+          // No alias — but in-place still found the deployed color
+          assert(not("jobs".in(aliases.keys()))),
+          desired_pipelines' = desired_pipelines,
+          live_pipelines' = live_pipelines,
+          aliases' = aliases,
+          current_plans' = current_plans,
+          os_indices' = os_indices,
+        }
+      )
+  }
+
+  // Scenario: in-place plus a not-yet-deployed pipeline. Existing pipeline
+  // updates in-place; new pipeline gets a fresh color (no choice — there's
+  // nothing to update in place).
+  run test_e2e_in_place_mixed_existing_and_new = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      // Now load BOTH an updated jobs and a brand new clients
+      .then(
+        val updated_transform = { ...fixture_transform_config, function_body: "drift" }
+        val updated_config = { ...fixture_pipeline_config, transform: updated_transform }
+        load_desired_config("jobs", updated_config)
+      )
+      .then(load_desired_config("clients", fixture_clients_config))
+      .then(cmd_plan_in_place)
+      .then(all {
+        // Two plans
+        assert(current_plans.size() == 2),
+        // Jobs: in-place (no CreateIndex)
+        assert(current_plans.filter(p => p.pipeline == "jobs").forall(p =>
+          not(plan_creates_new_color(p))
+        )),
+        // Clients: fresh-create (CreateIndex present, since pipeline is new)
+        assert(current_plans.filter(p => p.pipeline == "clients").forall(p =>
+          plan_creates_new_color(p)
+        )),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+  }
+
+  // Scenario: spec-level property check — generate_plans_with_options(in_place=true)
+  // never produces a CreateIndex for a kind=Update pipeline. Asserts directly
+  // against the planner function rather than only via state.
+  run test_in_place_planner_never_emits_create_index_for_existing = {
+    init
+      .then(load_desired_config("jobs", fixture_pipeline_config))
+      .then(cmd_apply(false))
+      .then(
+        val color = deployed_color_for("jobs", live_pipelines)
+        backfill_completes("jobs", color)
+      )
+      .then(
+        val updated_config = { ...fixture_pipeline_config,
+          transform: { ...fixture_transform_config, function_body: "different" } }
+        load_desired_config("jobs", updated_config)
+      )
+      .then(all {
+        assert(in_place_plans_never_create_index_for_existing(
+          desired_pipelines, live_pipelines, ALL_COLORS, os_indices
+        )),
+        desired_pipelines' = desired_pipelines,
+        live_pipelines' = live_pipelines,
+        aliases' = aliases,
+        current_plans' = current_plans,
+        os_indices' = os_indices,
+      })
+  }
+
   // Scenario: multiple pipelines migrating from pgsync, different colors occupied
   run test_e2e_migration_multi_pipeline = {
     init

@@ -205,6 +205,36 @@ module effects {
       { effect: UpdateSink({ id: live.sink.config.id, config: desired.sink }), status: Pending, depends_on: Set(), order: 1 },
     )
 
+  // Effects for in-place FULL update — re-emit transform / enrichment / sink
+  // against the currently-deployed color, even when the diff would normally
+  // trigger a backfill or reindex onto a new color.
+  //
+  // This is the `srb apply --in-place` path: "don't roll a new color, just
+  // update what's already running". Skips CreateIndex / TriggerBackfill /
+  // TriggerReindex — the existing index keeps its current shape. If mappings
+  // genuinely need to change, the user must use red-black (without
+  // --in-place) for safety; in-place is for hot-patching transforms /
+  // enrichments / operational fields.
+  pure def effects_for_in_place_full_update(
+    pipeline: PipelineName,
+    desired: PipelineConfig,
+    live: LivePipelineState
+  ): List[PlannedEffect] =
+    val primary = List(
+      { effect: CreateTransform(desired.transform), status: Pending, depends_on: Set(), order: 1 },
+      { effect: CreateEnrichment(desired.enrichment), status: Pending, depends_on: Set(), order: 2 },
+      { effect: CreateSink(desired.sink), status: Pending, depends_on: Set(1, 2), order: 3 },
+    )
+    val webhook_effects = desired.webhooks.foldl(List(), (acc, wh) =>
+      val base = 3 + acc.length()
+      acc.concat(List(
+        { effect: CreateTransform(wh.transform), status: Pending, depends_on: Set(), order: base + 1 },
+        { effect: CreateEnrichment(wh.enrichment), status: Pending, depends_on: Set(), order: base + 2 },
+        { effect: CreateSink(wh.sink), status: Pending, depends_on: Set(base + 1, base + 2), order: base + 3 },
+      ))
+    )
+    primary.concat(webhook_effects)
+
   // Effects for updating a pipeline — three paths by escalation:
   // 1. Backfill (hours): document content must change (transform, enrichment, sink data fields)
   // 2. Reindex (minutes): only index schema changed, documents are correct
@@ -228,13 +258,18 @@ module effects {
   // Plan generation for a single pipeline
   // ---------------------------------------------------------------------------
 
-  // Generate a plan for a single pipeline given desired config, live state, and a target color
-  pure def plan_for_pipeline(
+  // Generate a plan for a single pipeline given desired config, live state, and a target color.
+  // `in_place=true` forces effects_for_in_place_full_update for kind=Update —
+  // the pipeline is updated against `target_color` (caller must pass the
+  // deployed color) without rolling a new color. kind=Create is unaffected
+  // (you can't update what doesn't exist).
+  pure def plan_for_pipeline_options(
     pipeline: PipelineName,
     desired: PipelineName -> PipelineConfig,
     live: (PipelineName, Color) -> LivePipelineState,
     target_color: Color,
-    all_colors: Set[Color]
+    all_colors: Set[Color],
+    in_place: bool
   ): Plan =
     val kind = pipeline_change_kind(pipeline, desired, live, all_colors)
     // For Update, find a live color to compare against for field-level diff
@@ -245,6 +280,7 @@ module effects {
           val live_state = live.get((pipeline, live_color))
           val cfg = desired.get(pipeline)
           if (not(pipeline_has_changes(cfg, live_state))) List()
+          else if (in_place) effects_for_in_place_full_update(pipeline, cfg, live_state)
           else effects_for_update(pipeline, cfg, live_state, target_color)
       | Delete => List()
       | NoChange => List()
@@ -255,4 +291,14 @@ module effects {
     }
     val changes: Set[ResourceChange] = Set({ resource_id: pipeline, kind: actual_kind, field_changes: Set() })
     { pipeline: pipeline, target_color: target_color, changes: changes, effects: effs }
+
+  // Backwards-compatible default: in_place=false (normal red-black).
+  pure def plan_for_pipeline(
+    pipeline: PipelineName,
+    desired: PipelineName -> PipelineConfig,
+    live: (PipelineName, Color) -> LivePipelineState,
+    target_color: Color,
+    all_colors: Set[Color]
+  ): Plan =
+    plan_for_pipeline_options(pipeline, desired, live, target_color, all_colors, false)
 }

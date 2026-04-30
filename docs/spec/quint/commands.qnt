@@ -23,6 +23,22 @@ module commands {
   }
 
   // ---------------------------------------------------------------------------
+  // Command: plan --in-place
+  // Like cmd_plan, but for kind=Update pipelines, targets the currently-deployed
+  // color and forces a full-update path (no new color rolled, no backfill,
+  // no reindex). kind=Create pipelines still fall through to fresh allocation.
+  // ---------------------------------------------------------------------------
+
+  action cmd_plan_in_place: bool = all {
+    desired_pipelines.keys().size() > 0,
+    current_plans' = generate_plans_with_options(desired_pipelines, live_pipelines, ALL_COLORS, os_indices, true),
+    desired_pipelines' = desired_pipelines,
+    live_pipelines' = live_pipelines,
+    aliases' = aliases,
+    os_indices' = os_indices,
+  }
+
+  // ---------------------------------------------------------------------------
   // Command: apply
   // Same as plan, then execute effects (create resources, trigger backfills)
   // ---------------------------------------------------------------------------
@@ -40,6 +56,69 @@ module commands {
       | TriggerReindex(_) => true
       | _ => false
     })
+
+  // ---------------------------------------------------------------------------
+  // Command: apply --in-place
+  // Plan + execute in in-place mode: never roll a new color for an existing
+  // pipeline; just refresh transform / enrichment / sink against the
+  // currently-deployed color. Pipelines that don't yet exist are created
+  // fresh (same as normal apply, since there's nothing to update in place).
+  //
+  // Skip-backfill is irrelevant here: in-place updates don't trigger a
+  // backfill at all (the existing index is reused, document content lineage
+  // is preserved). For pipelines created fresh in this same run, backfill
+  // follows the normal rule.
+  // ---------------------------------------------------------------------------
+
+  action cmd_apply_in_place(skip_backfill: bool): bool = all {
+    desired_pipelines.keys().size() > 0,
+    val plans = generate_plans_with_options(desired_pipelines, live_pipelines, ALL_COLORS, os_indices, true)
+    val new_live = plans.fold(live_pipelines, (acc, p) =>
+      if (p.effects.length() == 0 or not(p.pipeline.in(desired_pipelines.keys()))) acc
+      else if (not(plan_creates_new_color(p))) {
+        // In-place: pipeline is deployed at p.target_color; refresh
+        // declarative resources but keep index/lifecycle as-is.
+        val cfg = desired_pipelines.get(p.pipeline)
+        val existing = acc.get((p.pipeline, p.target_color))
+        acc.put((p.pipeline, p.target_color), {
+          ...existing,
+          sink: { ...existing.sink, config: cfg.sink },
+          transform: { config: cfg.transform, status: TransformActive },
+          enrichment: { config: cfg.enrichment, status: EnrichmentActive },
+          webhooks: cfg.webhooks.foldl(List(), (a, wh) =>
+            a.append({
+              sink: { config: wh.sink, lifecycle: SinkActive, backfilling: false },
+              transform: { config: wh.transform, status: TransformActive },
+              enrichment: { config: wh.enrichment, status: EnrichmentActive },
+            })
+          ),
+        })
+      } else {
+        // Pipeline doesn't exist yet — fall back to fresh create.
+        val cfg = desired_pipelines.get(p.pipeline)
+        acc.put((p.pipeline, p.target_color), {
+          sink: { config: cfg.sink, lifecycle: SinkActive, backfilling: not(skip_backfill) },
+          index: { config: cfg.index, status: IndexGreen, doc_count: 0 },
+          transform: { config: cfg.transform, status: TransformActive },
+          enrichment: { config: cfg.enrichment, status: EnrichmentActive },
+          webhooks: cfg.webhooks.foldl(List(), (a, wh) =>
+            a.append({
+              sink: { config: wh.sink, lifecycle: SinkActive, backfilling: false },
+              transform: { config: wh.transform, status: TransformActive },
+              enrichment: { config: wh.enrichment, status: EnrichmentActive },
+            })
+          ),
+        })
+      }
+    )
+    all {
+      live_pipelines' = new_live,
+      desired_pipelines' = desired_pipelines,
+      aliases' = aliases,
+      current_plans' = plans,
+      os_indices' = os_indices,
+    }
+  }
 
   action cmd_apply(skip_backfill: bool): bool = all {
     // Precondition: desired config exists
@@ -190,9 +269,13 @@ module commands {
 
   action step = any {
     cmd_plan,
+    cmd_plan_in_place,
     // Apply with or without backfill
     nondet skip = Set(true, false).oneOf()
     cmd_apply(skip),
+    // Apply in-place
+    nondet skip2 = Set(true, false).oneOf()
+    cmd_apply_in_place(skip2),
     // Manually trigger backfill
     all {
       desired_pipelines.keys().size() > 0,
@@ -295,6 +378,24 @@ module commands {
   val never_target_occupied_os_color: bool =
     current_plans.forall(p =>
       not((p.pipeline, p.target_color).in(os_indices))
+    )
+
+  // 7. In-place plans never roll a new color for a pipeline that already has
+  //    one deployed. This is a property of generate_plans_with_options(_, _, _, _, true)
+  //    — but as a state invariant it doesn't hold, because cmd_apply leaves
+  //    its just-executed (now-deployed) plans in current_plans, whose target
+  //    color is now part of `deployed`. Verified instead via test scenarios
+  //    in commands_test.qnt that assert the property right after
+  //    cmd_plan_in_place / cmd_apply_in_place runs.
+  pure def in_place_plans_never_create_index_for_existing(
+    desired: PipelineName -> PipelineConfig,
+    live: (PipelineName, Color) -> LivePipelineState,
+    all_colors: Set[Color],
+    os_indices: Set[(PipelineName, Color)]
+  ): bool =
+    generate_plans_with_options(desired, live, all_colors, os_indices, true).forall(p =>
+      val kind = pipeline_change_kind(p.pipeline, desired, live, all_colors)
+      if (kind == Update) not(plan_creates_new_color(p)) else true
     )
 
   // ---------------------------------------------------------------------------

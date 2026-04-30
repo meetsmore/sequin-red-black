@@ -36,6 +36,27 @@ export function parseColoredName(name: string): { pipeline: string; color: Color
 }
 
 /**
+ * Normalize a Sequin-exported sink destination so it compares apples-to-apples
+ * with the user's sink.yaml template. The template carries the bare alias name
+ * (e.g. `index_name: "jobs"`); apply-time YAML generation stamps the color
+ * onto it (`"jobs_red"`). Without stripping the suffix back off here, the
+ * planner sees a phantom destination diff on every steady-state run and
+ * replans a full backfill onto a new color.
+ */
+export function normalizeLiveDestination(
+  dest: Record<string, unknown> | undefined,
+  color: Color,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = dest ? { ...dest } : {};
+  const liveIndexName = out.index_name;
+  const suffix = `_${color}`;
+  if (typeof liveIndexName === "string" && liveIndexName.endsWith(suffix)) {
+    out.index_name = liveIndexName.slice(0, -suffix.length);
+  }
+  return out;
+}
+
+/**
  * Find OpenSearch indices that match the {pipeline}_{color} pattern but are NOT
  * managed by Sequin. These are "foreign" indices (e.g. from pgsync) that occupy
  * a color slot.
@@ -128,9 +149,13 @@ export async function discoverLiveState(
       // The desired config has base names (e.g. "jobs-transform"), while live
       // has colored names (e.g. "jobs_red-transform"). We strip the color
       // prefix to make comparison meaningful for content fields.
-      const dest = s.destination as Record<string, unknown> | undefined;
+      const rawDest = s.destination as Record<string, unknown> | undefined;
       const transformRef = (s.transform as string) ?? "";
       const enrichmentRef = s.enrichment ? (s.enrichment as string) : "";
+
+      // Normalize the destination so steady-state diffs aren't dominated by
+      // the apply-time color stamp on index_name. See normalizeLiveDestination.
+      const dest = normalizeLiveDestination(rawDest, color);
 
       // Strip color prefix from function references for comparison
       // "jobs_red-transform" → "jobs-transform"
@@ -152,7 +177,7 @@ export async function discoverLiveState(
         name: pipeline, // base name for comparison
         database: (s.database as string) ?? "",
         sourceTable,
-        destination: (dest as Record<string, unknown>) ?? {},
+        destination: dest,
         filters: "",
         batchSize: (s.batch_size as number) ?? 1000,
         transformId: baseTransformId, // base name for comparison

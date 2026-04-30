@@ -48,7 +48,8 @@ function getOnlineOpts(opts: Record<string, string>) {
 
 addConnectionOpts(online.command("plan").description("Show planned changes"))
   .option("--output <format>", "Output format (text|json)", "text")
-  .action(async (opts) => { await planCommand({ ...getOnlineOpts(opts), output: opts.output }); });
+  .option("--in-place", "Plan against the current active color (skip red-black swap; ignores index changes). Mirror of `apply --in-place`.")
+  .action(async (opts) => { await planCommand({ ...getOnlineOpts(opts), output: opts.output, inPlace: opts.inPlace }); });
 
 addConnectionOpts(online.command("apply").description("Apply planned changes"))
   .option("--skip-backfill", "Skip backfill triggers")

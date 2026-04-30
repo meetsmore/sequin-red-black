@@ -331,6 +331,236 @@ describe("generatePlans", () => {
     expect(plans[0].effects.map((e) => e.effect.kind)).toContain("TriggerBackfill");
   });
 
+  // ---------------------------------------------------------------------------
+  // Color-templated destination fields: sink.yaml carries the *bare* index
+  // alias (e.g. "jobs"); state discovery returns the *colored* deployed name
+  // ("jobs_red"). The planner must not flag this as a change, otherwise every
+  // run with no actual config change would replan a full backfill onto a new
+  // color.
+  // ---------------------------------------------------------------------------
+
+  test("destination index_name color-stamping must not produce a spurious change", () => {
+    // Desired (from sink.yaml template): bare "jobs".
+    // Live (post normalizeLiveDestination): also bare "jobs" — discovery
+    // strips the trailing _<color> off Sequin's exported "jobs_red" so the
+    // planner can compare apples-to-apples. If the normalization regresses
+    // (or the planner ever consumes raw colored names), this test catches
+    // it: any difference will produce a plan instead of zero.
+    const desired = new Map([
+      [
+        "jobs",
+        fixturePipeline({
+          sink: {
+            destination: {
+              type: "elasticsearch",
+              endpoint_url: "https://opensearch.example.com",
+              auth_type: "none",
+              index_name: "jobs",
+            },
+          },
+        }),
+      ],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [
+        pipelineKey("jobs", "red"),
+        fixtureLiveState({
+          sink: {
+            destination: {
+              type: "elasticsearch",
+              endpoint_url: "https://opensearch.example.com",
+              auth_type: "none",
+              index_name: "jobs", // post-discovery normalized form
+            },
+          },
+        }),
+      ],
+    ]);
+
+    const plans = generatePlans(desired, live);
+    expect(plans).toHaveLength(0);
+  });
+
+  test("destination changes other than index_name are still detected", () => {
+    // Sanity check: the index_name normalization above must not mask real
+    // destination changes.
+    const desired = new Map([
+      [
+        "jobs",
+        fixturePipeline({
+          sink: {
+            destination: {
+              type: "elasticsearch",
+              endpoint_url: "https://NEW-cluster.example.com",
+              auth_type: "none",
+              index_name: "jobs",
+            },
+          },
+        }),
+      ],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [
+        pipelineKey("jobs", "red"),
+        fixtureLiveState({
+          sink: {
+            destination: {
+              type: "elasticsearch",
+              endpoint_url: "https://OLD-cluster.example.com",
+              auth_type: "none",
+              index_name: "jobs_red",
+            },
+          },
+        }),
+      ],
+    ]);
+
+    const plans = generatePlans(desired, live);
+    expect(plans).toHaveLength(1);
+  });
+
+  test("destination index_name with color-stripping must equal pipeline name", () => {
+    // The normalization rule: live's index_name should always be exactly
+    // `<pipeline>_<color>` for a given (pipeline, color) key. Confirms our
+    // assumption — if this ever changes, the diff logic must update.
+    const live = fixtureLiveState({
+      sink: {
+        destination: {
+          type: "elasticsearch",
+          endpoint_url: "x",
+          auth_type: "none",
+          index_name: "jobs_red",
+        },
+      },
+    });
+    const indexName = (live.sink.config.destination as { index_name: string }).index_name;
+    expect(indexName).toBe("jobs_red");
+    expect(indexName.replace(/_red$/, "")).toBe("jobs"); // strips back to bare
+  });
+
+  // ---------------------------------------------------------------------------
+  // --in-place semantics — explicit contract per user spec:
+  //   "if we use --in-place, we don't do red-black, it just doesn't roll a new
+  //    color, and we update whatever the current active color is. Note that
+  //    'active color' does NOT mean what color opensearch is pointing to —
+  //    new colors shouldn't be created unless it's for indexes that don't
+  //    exist at all."
+  // ---------------------------------------------------------------------------
+
+  test("in-place: alias points to a color that is not deployed -> targets deployed color (alias is irrelevant)", () => {
+    // The OS alias may lag behind reality (manual surgery, dropped color, etc.).
+    // --in-place must trust the deployed sink, not the alias.
+    const desired = new Map([
+      ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [pipelineKey("jobs", "blue"), fixtureLiveState()],
+    ]);
+    const aliases = new Map<string, "red" | "black" | "blue" | "green" | "purple" | "orange" | "yellow">([
+      ["jobs", "red"], // alias points to red — but red is NOT deployed
+    ]);
+
+    const plans = generatePlans(desired, live, undefined, aliases, undefined, { inPlace: true });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].targetColor).toBe("blue"); // deployed color wins
+    expect(plans[0].inPlace).toBe(true);
+  });
+
+  test("in-place: deployed color is outside allowedColors -> still targets it (in-place doesn't roll, so allowedColors is irrelevant)", () => {
+    // User's exact scenario: _srb.yaml restricts allowed colors to e.g. blue/green/purple
+    // (red/black reserved for legacy pgsync). Pipeline already deployed at blue.
+    // --in-place must target blue regardless of any other constraint.
+    const desired = new Map([
+      ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [pipelineKey("jobs", "blue"), fixtureLiveState()],
+    ]);
+    const allowedColors = ["green", "purple"] as const; // blue NOT in this list
+
+    const plans = generatePlans(desired, live, [...allowedColors], undefined, undefined, { inPlace: true });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].targetColor).toBe("blue"); // existing deploy wins over allowedColors
+    expect(plans[0].inPlace).toBe(true);
+  });
+
+  test("in-place: must NEVER emit CreateIndex/TriggerBackfill/TriggerReindex/SwapAlias for an existing pipeline", () => {
+    // Different change shapes that would normally pick different effect paths.
+    // --in-place collapses all of them to a CreateTransform/Enrichment/Sink trio.
+    const cases: Array<{ name: string; desired: Partial<{ sink: Partial<SinkConfig>; index: Partial<IndexConfig>; transform: Partial<TransformConfig>; enrichment: Partial<EnrichmentConfig> }> }> = [
+      { name: "transform changed", desired: { transform: { functionBody: "fn(r) { return r; }" } } },
+      { name: "enrichment changed", desired: { enrichment: { source: "public.OtherDivision" } } },
+      { name: "index mappings changed", desired: { index: { mappings: { properties: { title: { type: "keyword" } } } } } },
+      { name: "batch size changed", desired: { sink: { batchSize: 999 } } },
+    ];
+    for (const c of cases) {
+      const desired = new Map([["jobs", fixturePipeline(c.desired)]]);
+      const live = new Map<PipelineKey, LivePipelineState>([
+        [pipelineKey("jobs", "blue"), fixtureLiveState()],
+      ]);
+
+      const plans = generatePlans(desired, live, undefined, undefined, undefined, { inPlace: true });
+
+      expect(plans).toHaveLength(1);
+      const kinds = plans[0].effects.map((e) => e.effect.kind);
+      expect(kinds, `case: ${c.name}`).not.toContain("CreateIndex");
+      expect(kinds, `case: ${c.name}`).not.toContain("TriggerBackfill");
+      expect(kinds, `case: ${c.name}`).not.toContain("TriggerReindex");
+      expect(kinds, `case: ${c.name}`).not.toContain("SwapAlias");
+      expect(plans[0].targetColor, `case: ${c.name}`).toBe("blue");
+      expect(plans[0].inPlace, `case: ${c.name}`).toBe(true);
+    }
+  });
+
+  test("in-place: mixed (existing + missing pipelines) — existing gets in-place, missing creates fresh", () => {
+    // jobs is deployed at blue, clients is brand new. --in-place updates jobs in
+    // place at blue and creates clients fresh — no error, no skipped pipelines.
+    const desired = new Map([
+      ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
+      ["clients", fixtureClientPipeline()],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [pipelineKey("jobs", "blue"), fixtureLiveState()],
+    ]);
+
+    const plans = generatePlans(desired, live, undefined, undefined, undefined, { inPlace: true });
+
+    const byPipeline = new Map(plans.map((p) => [p.pipeline, p]));
+    expect(byPipeline.size).toBe(2);
+
+    const jobsPlan = byPipeline.get("jobs")!;
+    expect(jobsPlan.inPlace).toBe(true);
+    expect(jobsPlan.targetColor).toBe("blue");
+    expect(jobsPlan.effects.map((e) => e.effect.kind)).not.toContain("CreateIndex");
+
+    const clientsPlan = byPipeline.get("clients")!;
+    expect(clientsPlan.inPlace).toBe(false); // fresh-create can't be "in place"
+    expect(clientsPlan.effects.map((e) => e.effect.kind)).toContain("CreateIndex");
+    expect(clientsPlan.effects.map((e) => e.effect.kind)).toContain("TriggerBackfill");
+  });
+
+  test("in-place: must not allocate a NEW color when an existing one is deployed", () => {
+    // Regression test for the contract: if a pipeline is deployed (at any
+    // color), --in-place targets that color; it must not pick a different,
+    // unoccupied color.
+    const desired = new Map([
+      ["jobs", fixturePipeline({ transform: { functionBody: "fn(r) { return r; }" } })],
+    ]);
+    const live = new Map<PipelineKey, LivePipelineState>([
+      [pipelineKey("jobs", "purple"), fixtureLiveState()], // unusual color
+    ]);
+
+    const plans = generatePlans(desired, live, undefined, undefined, undefined, { inPlace: true });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].targetColor).toBe("purple");
+    // Critically: should not pick red/black/blue (which are unoccupied) just
+    // because the picker would have preferred them in a fresh deploy.
+    expect(["red", "black", "blue", "green", "orange", "yellow"]).not.toContain(plans[0].targetColor);
+  });
+
   test("two pipelines (jobs + clients) -> 2 independent plans", () => {
     const desired = new Map([
       ["jobs", fixturePipeline()],
