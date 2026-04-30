@@ -135,20 +135,31 @@ function diffEnrichmentResource(desired: PipelineConfig, live: LivePipelineState
 // Format effect
 // ---------------------------------------------------------------------------
 
-function formatEffect(effect: Effect, pipeline: string, color: Color): string {
+function formatEffect(effect: Effect, pipeline: string, color: Color, inPlace: boolean): string {
   // Use the resource's own bare id (which may belong to either the main
   // pipeline or a webhook) and colorize it the same way the executor and
   // yaml-gen do — so the name printed here is the exact name a reader
   // would find in Sequin / OpenSearch after apply.
+  //
+  // Verb choice:
+  // - `+ create` — the resource genuinely doesn't exist yet (fresh-color
+  //   create, or the in-place fallback path for a brand-new pipeline).
+  // - `~ upsert` — `sequin config apply` will reconcile the resource by
+  //   name; it already exists and gets updated in place. Used for the
+  //   declarative trio (transform / enrichment / sink) when the plan is
+  //   in-place. CreateIndex never appears in in-place mode (you can't
+  //   reshape an index in place — that path is filtered out by
+  //   effects_for_in_place_full_update), so it always reads as `+ create`.
+  const declarativeVerb = inPlace ? `${yellow("~")} upsert` : `${green("+")} create`;
   switch (effect.kind) {
     case "CreateIndex":
       return `${green("+")} create index ${cyan(`"${colorizeName(effect.index.id, color)}"`)}`;
     case "CreateTransform":
-      return `${green("+")} create function ${cyan(`"${colorizeName(effect.transform.id, color)}"`)}`;
+      return `${declarativeVerb} function ${cyan(`"${colorizeName(effect.transform.id, color)}"`)}`;
     case "CreateEnrichment":
-      return `${green("+")} create function ${cyan(`"${colorizeName(effect.enrichment.id, color)}"`)}`;
+      return `${declarativeVerb} function ${cyan(`"${colorizeName(effect.enrichment.id, color)}"`)}`;
     case "CreateSink":
-      return `${green("+")} create sink ${cyan(`"${colorizeName(effect.sink.id, color)}"`)}`;
+      return `${declarativeVerb} sink ${cyan(`"${colorizeName(effect.sink.id, color)}"`)}`;
     case "UpdateSink":
       // id comes from live state and is already colored.
       return `${yellow("~")} update sink ${cyan(`"${effect.id}"`)}`;
@@ -308,7 +319,7 @@ export function formatPlans(plans: Plan[], ctx: FormatPlanContext): string {
     const effectLines: string[] = [];
     effectLines.push(`  ${bold(cyan(plan.pipeline))} → ${bold(plan.targetColor)}`);
     for (const pe of plan.effects) {
-      effectLines.push(`    ${formatEffect(pe.effect, plan.pipeline, plan.targetColor)}`);
+      effectLines.push(`    ${formatEffect(pe.effect, plan.pipeline, plan.targetColor, plan.inPlace ?? false)}`);
     }
     effectSections.push(effectLines.join("\n"));
   }
